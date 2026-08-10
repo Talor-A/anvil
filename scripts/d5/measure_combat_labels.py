@@ -132,7 +132,7 @@ def main() -> None:
                 groups: dict[str, list[int]] = {}
                 for eid, e in cands.items():
                     groups.setdefault(_dedup_key(e, e.get("n")), []).append(eid)
-                for key, ids in groups.items():
+                for ids in groups.values():
                     k = sum(1 for eid in ids if eid in attackers)
                     if 0 < k < len(ids):
                         group_partials[(k, len(ids))] += 1

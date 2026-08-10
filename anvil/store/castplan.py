@@ -119,11 +119,13 @@ class ValidationReport:
 
     def summary(self) -> str:
         lines = [
-            f"{self.games} games, {self.windows} priority windows: "
-            f"{self.passes} pass, {self.casts} cast labels "
-            f"({self.with_targets} targeted, {self.with_x} with X, "
-            f"{self.with_opt_costs} with optional costs); "
-            f"{self.windows_with_opts} windows logged options",
+            (
+                f"{self.games} games, {self.windows} priority windows: "
+                f"{self.passes} pass, {self.casts} cast labels "
+                f"({self.with_targets} targeted, {self.with_x} with X, "
+                f"{self.with_opt_costs} with optional costs); "
+                f"{self.windows_with_opts} windows logged options"
+            ),
         ]
         if self.obs_null:
             lines.append(f"WARNING: {self.obs_null} windows had obs:null")

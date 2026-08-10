@@ -44,16 +44,16 @@ def _curation(tmp_path, rows):
 
 
 def _plan(curation, out, **kw):
-    defaults = dict(
-        curation=curation,
-        out=str(out),
-        ckpt="ckpt/last.pt",
-        k=16,
-        anchor="crash",
-        turn_offset=0,
-        tag="",
-        limit=0,
-    )
+    defaults = {
+        "curation": curation,
+        "out": str(out),
+        "ckpt": "ckpt/last.pt",
+        "k": 16,
+        "anchor": "crash",
+        "turn_offset": 0,
+        "tag": "",
+        "limit": 0,
+    }
     defaults.update(kw)
     a = argparse.Namespace(**defaults)
     gs.plan(a)
@@ -330,7 +330,7 @@ def test_plan_consumes_selection(tmp_path, src_arm):
         tmp_path, [{"store": store, "g": 5, "seed": 1, "crash_from_turn": 14, "peak_turn": 8}]
     )
     src = _label_src(tmp_path, "arms", [_drill_row(store, 5, 11, 4)])
-    rows, _ = _select(tmp_path, cur, [src])
+    _rows, _ = _select(tmp_path, cur, [src])
     sel = tmp_path / "sel" / "selection.jsonl"
     assert [json.loads(l)["drill_turn"] for l in sel.open()] == [11]
     m = _plan(sel, tmp_path / "plan", anchor="selected")

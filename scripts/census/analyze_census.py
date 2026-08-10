@@ -72,7 +72,7 @@ def main(paths: list[str]) -> None:
         evs.sort()
         i = 0
         while i < len(evs):
-            seq, m, d = evs[i]
+            _seq, m, d = evs[i]
             if m == "playChosenSpellAbility":
                 inner = []
                 j = i + 1

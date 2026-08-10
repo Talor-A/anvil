@@ -230,8 +230,10 @@ def test_mu_roundtrip_temperature(net_and_feat):
     # under tempering), so wrong-τ trips are sparse — ~2/160 on the D5 ckpt.
     # ≥1 is enough teeth: real iterations sample 10^5 decisions.
     assert mismatched >= 1, (
-        "τ=1 recompute of τ=0.5 records never tripped "
-        "the tripwire tolerance — control has no teeth",
+        (
+            "τ=1 recompute of τ=0.5 records never tripped "
+            "the tripwire tolerance — control has no teeth"
+        ),
         mismatched,
     )
 

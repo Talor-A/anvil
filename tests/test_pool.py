@@ -8,17 +8,7 @@ from anvil.pool.decklist import ShapeError, deck_from_export, parse_mtgo, to_dck
 from anvil.pool.fetch import parse_banlist
 
 EXPORT = (
-    "\n".join(
-        [
-            "1 Command Tower",
-            "96 Forest",
-            "1 Fire / Ice",
-            "1 Lim-Dul's Vault",
-            "",
-            "Sideboard",
-            "1 Tasigur, the Golden Fang",
-        ]
-    )
+    "1 Command Tower\n96 Forest\n1 Fire / Ice\n1 Lim-Dul's Vault\n\nSideboard\n1 Tasigur, the Golden Fang"
     + "\n"
 )
 

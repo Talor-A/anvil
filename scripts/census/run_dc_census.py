@@ -74,7 +74,7 @@ def main() -> None:
     a.out = a.out.resolve()  # lanes run with cwd=FORGE_GUI_DIR; relative paths are the known trap
 
     manifest = latest_manifest()
-    jar = sorted((FORGE_DIR / "forge-gui-desktop/target").glob("*-jar-with-dependencies.jar"))[-1]
+    jar = max((FORGE_DIR / "forge-gui-desktop/target").glob("*-jar-with-dependencies.jar"))
     a.out.mkdir(parents=True, exist_ok=True)
 
     pairs = pair_schedule([d["file"] for d in manifest["decks"]], a.pairs, a.seed_base)

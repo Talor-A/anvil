@@ -59,7 +59,7 @@ def test_featurizer_matches_loader_and_act_matches_forward():
 
     from anvil.store.trajectories import open_store
 
-    store = open_store(str(STORE))
+    open_store(str(STORE))
 
     net = None
     if CKPT.exists():
@@ -79,7 +79,7 @@ def test_featurizer_matches_loader_and_act_matches_forward():
     for dec, header, prior in _priority_windows():
         wire = dict(dec)
         wire["hist"] = _wire_hist(prior, dec["_pos"])
-        ex_serve, aux = feat.example(wire, header, "priority")
+        ex_serve, _aux = feat.example(wire, header, "priority")
 
         from anvil.encoder.transform import assemble, history_tokens
 

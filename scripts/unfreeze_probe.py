@@ -252,7 +252,7 @@ def _cell(
             best_state = {
                 k: v.detach().clone().cpu()
                 for k, v in net.state_dict().items()
-                if k.startswith("value_head") or k.startswith("trunk.")
+                if k.startswith(("value_head", "trunk."))
             }
         else:
             patience += 1

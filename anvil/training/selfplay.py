@@ -225,7 +225,7 @@ def iteration_batches(
     """§6d generation plan for one iteration: (purpose, n_games,
     start_index_offset, bridge_seats). Mirror batch first; heuristic-opponent
     games split evenly across seat assignments for symmetry."""
-    n_heur = int(round(games * heur_frac))
+    n_heur = round(games * heur_frac)
     h0 = n_heur // 2
     h1 = n_heur - h0
     n_mirror = games - n_heur
@@ -716,7 +716,6 @@ def main() -> None:
         k = state["iteration"]
         it_dir = out / f"iter-{k:03d}"
         it_dir.mkdir(exist_ok=True)
-        purpose = f"{args.name}-i{k:03d}"
         print(f"\n[selfplay] ===== iteration {k}: ckpt={state['ckpt']} =====")
         t_iter = time.monotonic()
 

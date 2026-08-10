@@ -153,7 +153,7 @@ def test_vtrace_step_rewards_shift_targets():
     z = torch.zeros(3)
     lam = 0.02
     step_r = torch.tensor([-lam, 0.0, 0.0])
-    vs, pg_adv, _ = vtrace_targets(z.clone(), z.clone(), z.clone(), reward=1.0, step_r=step_r)
+    vs, _pg_adv, _ = vtrace_targets(z.clone(), z.clone(), z.clone(), reward=1.0, step_r=step_r)
     assert vs.tolist() == pytest.approx([1.0 - lam, 1.0, 1.0])
     # without step_r: unchanged legacy behavior
     vs0, _, _ = vtrace_targets(z.clone(), z.clone(), z.clone(), reward=1.0)
