@@ -30,6 +30,7 @@ from anvil.encoder.transform import (
 )
 from anvil.policy.model import AnvilNet
 from anvil.schemas.manifests import TrainConfig
+from anvil.torch.utils import get_torch_device
 from anvil.training.dataset import PriorityWindows, collate, default_methods, default_sa_vocab
 
 REPO = Path(__file__).parents[1]
@@ -219,7 +220,7 @@ def main() -> None:
     a = ap.parse_args()
 
     torch.manual_seed(a.seed)
-    device = "cuda"
+    device = get_torch_device()
     out_dir = Path(a.out or f"data/training/run-{_dt.datetime.now(_dt.UTC):%Y%m%d-%H%M%S}")
     out_dir.mkdir(parents=True, exist_ok=True)
 

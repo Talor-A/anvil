@@ -186,10 +186,11 @@ def _cell(
     import torch
 
     from anvil.ante.ledger import ValueEvaluator
+    from anvil.torch.utils import get_torch_device
     from anvil.training.dataset import collate
 
     torch.manual_seed(args.seed)
-    device = "cuda"
+    device = get_torch_device()
     ev = ValueEvaluator(CKPT)
     net = ev.net
     n_layers = len(net.trunk.layers)

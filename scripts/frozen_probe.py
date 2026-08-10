@@ -54,6 +54,7 @@ from pathlib import Path
 import numpy as np
 
 from anvil.schemas.tensors import Example
+from anvil.torch.utils import get_torch_device
 
 DATASET = "data/runs/critic-calibration-v1/dataset.jsonl"
 CALIB_REPORT = "data/runs/critic-calibration-v1/report.json"
@@ -263,7 +264,7 @@ def _mlp_fit_pred(
     from torch import nn
 
     torch.manual_seed(seed)
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    dev = get_torch_device()
     # game-grouped inner val split for early stopping
     val_m = np.array([hashlib.sha256(f"mlpval:{g}".encode()).digest()[0] % 7 == 0 for g in gtr])
     if val_m.sum() < 20:
