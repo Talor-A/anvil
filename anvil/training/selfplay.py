@@ -384,29 +384,29 @@ def _census_tallies(run_dirs) -> dict:
                     r = json.loads(line)
                 except json.JSONDecodeError:
                     continue  # torn tail line from a killed worker (e.g. OOM)
-            if r.get("by") != "bridge":
-                continue
-            c["bridged"] += 1
-            if r.get("fallback") is True:
-                c["fallback"] += 1
-            if r.get("m") == "chooseSpellAbilityToPlay":
-                if r.get("veto"):
-                    c["veto"] += 1
-                    if not r.get("reask"):
-                        c["first_veto"] += 1
-                elif r.get("pick") == "pass":
-                    c["pass"] += 1
-                else:
-                    c["cast"] += 1
-                    if r.get("reask"):
-                        # re-ask rescue: a cast realized on attempt >0 —
-                        # pre-reask this window would have been a forced pass
-                        c["reask_rescued"] += 1
+                if r.get("by") != "bridge":
+                    continue
+                c["bridged"] += 1
+                if r.get("fallback") is True:
+                    c["fallback"] += 1
+                if r.get("m") == "chooseSpellAbilityToPlay":
+                    if r.get("veto"):
+                        c["veto"] += 1
+                        if not r.get("reask"):
+                            c["first_veto"] += 1
+                    elif r.get("pick") == "pass":
+                        c["pass"] += 1
                     else:
-                        c["first_cast"] += 1
-            for k in ("dropped", "forced"):
-                if r.get(k):
-                    c[f"combat_{k}"] += r[k]
+                        c["cast"] += 1
+                        if r.get("reask"):
+                            # re-ask rescue: a cast realized on attempt >0 —
+                            # pre-reask this window would have been a forced pass
+                            c["reask_rescued"] += 1
+                        else:
+                            c["first_cast"] += 1
+                for k in ("dropped", "forced"):
+                    if r.get(k):
+                        c[f"combat_{k}"] += r[k]
     c["veto_rate"] = round(c["veto"] / max(1, c["veto"] + c["cast"]), 4)
     # M3 D1: chain-independent basis — each window contributes exactly one
     # first attempt (census "reask" marks attempts > 0 only), so re-ask chains
