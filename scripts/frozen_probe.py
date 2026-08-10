@@ -108,7 +108,10 @@ def features(args: argparse.Namespace) -> None:
         ev = ValueEvaluator(ckpt)
 
         @torch.no_grad()
-        def capture(examples: list[dict]) -> tuple[np.ndarray, ...]:
+        def capture(
+            examples: list[dict],
+            ev: ValueEvaluator = ev,
+        ) -> tuple[np.ndarray, ...]:
             ss, pp, vv = [], [], []
             for i in range(0, len(examples), ev.batch):
                 chunk = collate(examples[i : i + ev.batch])

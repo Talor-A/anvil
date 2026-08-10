@@ -71,15 +71,16 @@ def _notify(title: str, msg: str) -> None:
 def _boot_btime() -> int:
     """Boot time as seconds since epoch. Linux via /proc/stat; macOS via sysctl."""
     try:
-        for line in open("/proc/stat"):
-            if line.startswith("btime "):
-                return int(line.split()[1])
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return int(line.split()[1])
     except OSError:
         pass
     try:
-        out = subprocess.run(["sysctl", "-n", "kern.boottime"],
-                             capture_output=True, text=True, check=True,
-                             timeout=5).stdout.strip()
+        out = subprocess.run(
+            ["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, check=True, timeout=5
+        ).stdout.strip()
         # '{ sec = 1234567890, usec = 0 } Mon Jan  1 00:00:00 2024'
         return int(out.split("=")[1].split(",")[0].strip())
     except Exception:  # noqa: BLE001
@@ -101,9 +102,13 @@ def _proc_starttime(pid: int) -> int | None:
     except OSError:
         pass
     try:
-        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
-                             capture_output=True, text=True, check=False,
-                             timeout=5).stdout.strip()
+        out = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        ).stdout.strip()
         if not out:
             return None
         start_ts = int(time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y")))

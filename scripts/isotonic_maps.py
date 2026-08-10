@@ -51,7 +51,8 @@ def load_map(path: str | Path, key: str):
 
 
 def export(args: argparse.Namespace) -> None:
-    rows = [json.loads(line) for line in Path(args.dataset).open()]
+    with Path(args.dataset).open() as f:
+        rows = [json.loads(line) for line in f]
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     maps: dict = {}
@@ -78,7 +79,7 @@ def export(args: argparse.Namespace) -> None:
     doc = {
         "provenance": {
             "dataset": str(args.dataset),
-            "created": _dt.date.today().isoformat(),
+            "created": _dt.datetime.now(_dt.UTC).date().isoformat(),
             "fit": "PAV on ALL labels (asset map; report-style holdout lives "
             "in critic_calibration.py)",
             "era_scope": "a map is valid only for its era's critic values "

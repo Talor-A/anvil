@@ -61,7 +61,7 @@ def build() -> dict:
         deck_id = int(path.stem)
         meta = json.loads(path.with_suffix(".json").read_text())
 
-        def exclude(reason: str) -> None:
+        def exclude(reason: str, deck_id=deck_id, meta=meta) -> None:
             excluded.append({"deck_id": deck_id, "reason": reason, "url": meta.get("source_url")})
 
         try:

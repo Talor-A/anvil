@@ -196,8 +196,8 @@ class Run:
             # M4 D3: completions become store frames of their own
             cmd += ["-forkobs"]
         (wdir / "cmd.txt").write_text(" ".join(cmd) + "\n")
-        out = open(wdir / "out.log", "a")
-        return subprocess.Popen(cmd, cwd=FORGE_GUI_DIR, stdout=out, stderr=subprocess.STDOUT)
+        with open(wdir / "out.log", "a") as out:
+            return subprocess.Popen(cmd, cwd=FORGE_GUI_DIR, stdout=out, stderr=subprocess.STDOUT)
 
     # ---------- scheduler ----------
 
@@ -278,7 +278,7 @@ class Run:
 
 def launch(a) -> Path:
     jar = _find_jar()
-    run_id = f"{a.purpose}-{_dt.datetime.now():%Y%m%d-%H%M%S}"
+    run_id = f"{a.purpose}-{_dt.datetime.now(_dt.UTC):%Y%m%d-%H%M%S}"
     run_dir = RUNS_DIR / run_id
     (run_dir / "workers").mkdir(parents=True)
 
@@ -289,7 +289,8 @@ def launch(a) -> Path:
         import shutil
 
         shutil.copy(a.pairs_file, run_dir / "pairs.txt")
-        n_lines = sum(1 for _ in open(run_dir / "pairs.txt"))
+        with open(run_dir / "pairs.txt") as f:
+            n_lines = sum(1 for _ in f)
         pool_fields = {
             "pairs_file": "pairs.txt",
             "pairs_source": str(a.pairs_file),
@@ -345,7 +346,7 @@ def launch(a) -> Path:
     manifest = {
         "run_id": run_id,
         "purpose": a.purpose,
-        "created": _dt.datetime.now().isoformat(timespec="seconds"),
+        "created": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "fork_commit": _git(FORGE_DIR, "rev-parse", "HEAD"),
         "fork_dirty": bool(_git(FORGE_DIR, "status", "--porcelain")),
         "anvil_commit": _git(Path(__file__).parents[3], "rev-parse", "HEAD"),

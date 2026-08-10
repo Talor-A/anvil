@@ -89,7 +89,7 @@ def arm(
     if calibrated:
         cmd.append("--calibrated")
     t0 = time.monotonic()
-    p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=False)
     elapsed = time.monotonic() - t0
     if p.returncode != 0:
         return {"workers": workers, "ok": False, "error": (p.stderr or p.stdout)[-1200:]}
@@ -98,12 +98,13 @@ def arm(
     rd = Path(new.pop()) if len(new) == 1 else None
     decisive = crashed = 0
     if rd is not None and (rd / "games.jsonl").exists():
-        for line in open(rd / "games.jsonl"):
-            r = json.loads(line)
-            if r.get("status") == "won":
-                decisive += 1
-            else:
-                crashed += 1
+        with open(rd / "games.jsonl") as f:
+            for line in f:
+                r = json.loads(line)
+                if r.get("status") == "won":
+                    decisive += 1
+                else:
+                    crashed += 1
     return {
         "workers": workers,
         "ok": True,

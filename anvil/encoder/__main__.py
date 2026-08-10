@@ -86,7 +86,7 @@ def cmd_embed(a) -> None:
                 "fork_commit": fork_commit(),
                 "model": model_id,
                 "model_revision": revision,
-                "created": _dt.datetime.now().isoformat(timespec="seconds"),
+                "created": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
                 "dim": emb.shape[1],
                 "count": emb.shape[0],
                 "dtype": "float16",

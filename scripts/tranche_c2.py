@@ -80,7 +80,7 @@ def _run(cmd: list[str], ok_codes: tuple[int, ...] = (0,)) -> int:
     print(f"[tranche-c2] $ {' '.join(cmd)}", flush=True)
     WATCH_STATE["phase_start"] = time.time()  # a new step is progress
     WATCH_STATE["step"] = " ".join(cmd[1:4])
-    rc = subprocess.run(cmd, cwd=ROOT).returncode
+    rc = subprocess.run(cmd, cwd=ROOT, check=False).returncode
     if rc not in ok_codes:
         raise RuntimeError(f"step failed rc={rc}: {cmd[:4]}...")
     return rc
@@ -141,7 +141,7 @@ def _watchd(action: str) -> None:
     cmd = [sys.executable, "scripts/anvil_watchd.py", action, "--name", "tranche-c2"]
     if action == "register":
         cmd += ["--pid", str(os.getpid()), "--dir", str(ROOT / BASE), "--stall-min", "90"]
-    subprocess.run(cmd, cwd=ROOT)
+    subprocess.run(cmd, cwd=ROOT, check=False)
 
 
 def _marker(name: str) -> Path:
@@ -270,7 +270,10 @@ def main() -> None:
                 + (["--limit", "6"] if a.smoke else [])
             )
             _finish("p1")
-            n = sum(1 for d in _label_dirs() for _ in open(ROOT / d / "drills.jsonl"))
+            n = 0
+            for d in _label_dirs():
+                with open(ROOT / d / "drills.jsonl") as fh:
+                    n += sum(1 for _ in fh)
             notify("tranche c2 p1 done", f"{n} labels banked in {(time.time() - t0) / 3600:.1f}h")
 
         # ---- checkpoint 1 ----

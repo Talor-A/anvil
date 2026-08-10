@@ -57,8 +57,8 @@ def main() -> None:
     cands = [
         r
         for r in cands
-        if lo <= (lambda p: p["model_wins"] / p["n"])(peak[(r["store"], r["g"])]) <= hi
-        and peak[(r["store"], r["g"])]["fired_t"] < r["crash_from_turn"]
+        if lo <= (peak_r := peak[(r["store"], r["g"])])["model_wins"] / peak_r["n"] <= hi
+        and peak_r["fired_t"] < r["crash_from_turn"]
     ]
     cands.sort(key=lambda r: hashlib.sha256(f"compose:{r['store']}:{r['g']}".encode()).hexdigest())
     swapped = 0

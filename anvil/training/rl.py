@@ -663,7 +663,7 @@ def main() -> None:
         "init_step": ckpt.get("step"),
     }
     (out_dir / "config.json").write_text(json.dumps(rl_cfg, indent=2, default=str))
-    metrics = open(out_dir / "metrics.jsonl", "a", buffering=1)
+    metrics = open(out_dir / "metrics.jsonl", "a", buffering=1)  # noqa: SIM115 -- long-lived metrics append handle
 
     ds = RlTrajectories(
         stores,

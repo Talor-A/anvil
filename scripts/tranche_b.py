@@ -193,7 +193,10 @@ def main() -> None:
                 ]
             )
 
-        n = sum(1 for f in glob.glob(f"{MAP_OUT}/drills.jsonl") for _ in open(f))
+        n = 0
+        for f in glob.glob(f"{MAP_OUT}/drills.jsonl"):
+            with open(f) as fh:
+                n += sum(1 for _ in fh)
         wall_h = (time.time() - t0) / 3600
         print(f"[tranche-b] DONE: map {n} labels + sweep arms in {wall_h:.1f}h")
         notify("tranche B done", f"fresh-game labels banked (map {n} + arms) in {wall_h:.1f}h")

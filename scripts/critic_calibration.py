@@ -69,9 +69,10 @@ def _bin_of(wr: float) -> str:
 
 def _load_traces(path: str) -> dict[tuple, dict[int, float]]:
     out = {}
-    for line in Path(path, "traces.jsonl").open():
-        r = json.loads(line)
-        out[(r["store"], r["g"])] = {t: v for t, v in r["vals"]}
+    with Path(path, "traces.jsonl").open() as f:
+        for line in f:
+            r = json.loads(line)
+            out[(r["store"], r["g"])] = {t: v for t, v in r["vals"]}
     return out
 
 
@@ -79,30 +80,31 @@ def build_dataset(era: str, cfg: dict) -> list[dict]:
     tr = {k: _load_traces(p) for k, p in cfg["traces"].items()}
     rows, miss = [], 0
     for src in cfg["labels"]:
-        for line in Path(src, "drills.jsonl").open():
-            r = json.loads(line)
-            if r["n"] <= 0:
-                continue
-            key = (r["store"], r["g"])
-            t = r["fired_t"]
-            vals = {k: tr[k].get(key, {}).get(t) for k in tr}
-            if any(v is None for v in vals.values()):
-                miss += 1
-                continue
-            rows.append(
-                {
-                    "era": era,
-                    "src": Path(src).name,
-                    "store": r["store"],
-                    "g": r["g"],
-                    "t": t,
-                    "wr": r["model_wins"] / r["n"],
-                    "n": r["n"],
-                    "v_era": vals["era"],
-                    "v_d4": vals["d4"],
-                    "deck": r["deck"],
-                }
-            )
+        with Path(src, "drills.jsonl").open() as f:
+            for line in f:
+                r = json.loads(line)
+                if r["n"] <= 0:
+                    continue
+                key = (r["store"], r["g"])
+                t = r["fired_t"]
+                vals = {k: tr[k].get(key, {}).get(t) for k in tr}
+                if any(v is None for v in vals.values()):
+                    miss += 1
+                    continue
+                rows.append(
+                    {
+                        "era": era,
+                        "src": Path(src).name,
+                        "store": r["store"],
+                        "g": r["g"],
+                        "t": t,
+                        "wr": r["model_wins"] / r["n"],
+                        "n": r["n"],
+                        "v_era": vals["era"],
+                        "v_d4": vals["d4"],
+                        "deck": r["deck"],
+                    }
+                )
     print(f"[data] {era}: {len(rows)} labels ({miss} trace-join misses)")
     return rows
 

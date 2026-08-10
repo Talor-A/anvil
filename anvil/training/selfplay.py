@@ -53,6 +53,7 @@ def _auto_seg(pinned: int) -> int:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         free_mb = int(out.stdout.split()[0])
     except Exception as e:  # noqa: BLE001
@@ -95,7 +96,7 @@ def _sleep_inhibitor(name: str) -> subprocess.Popen | None:
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        preexec_fn=_die_with_parent,
+        preexec_fn=_die_with_parent,  # noqa: PLW1509 -- single-purpose child: must die with parent, no threads
     )
     print(f"[selfplay] sleep inhibitor held (pid {proc.pid})")
     return proc
@@ -145,7 +146,8 @@ def _start_server(
             # mainline replay argmax on the pinned ckpt
             cmd += ["--drill-sample", "--drill-mu-out", str(drill_mu_out)]
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-    proc = subprocess.Popen(cmd, stdout=open(log, "w"), stderr=subprocess.STDOUT, env=env)
+    with open(log, "w") as log_f:
+        proc = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT, env=env)
     try:
         _wait_port(port)
     except TimeoutError:
@@ -254,7 +256,8 @@ def _drill_phase(args, state: dict, k: int, drill_dir: Path) -> list[str]:
     drill-provenance stores and join this iteration's store group: fresh
     now, replay-aged later, exactly like game stores. Returns store paths."""
     drill_dir.mkdir(exist_ok=True)
-    rows = [json.loads(line) for line in open(args.drill_selection)]
+    with open(args.drill_selection) as f:
+        rows = [json.loads(line) for line in f]
     sl = drill_slice(rows, k, args.drill_points_per_iter)
     subset = drill_dir / "slice.jsonl"
     subset.write_text("".join(json.dumps(r) + "\n" for r in sl))
@@ -375,11 +378,12 @@ def _census_tallies(run_dirs) -> dict:
     dirs = run_dirs if isinstance(run_dirs, (list, tuple)) else [run_dirs]
     c: Counter[str] = Counter()
     for f in (f for rd in dirs for f in Path(rd).glob("workers/inv-*/census.jsonl")):
-        for line in open(f):
-            try:
-                r = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # torn tail line from a killed worker (e.g. OOM)
+        with open(f) as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # torn tail line from a killed worker (e.g. OOM)
             if r.get("by") != "bridge":
                 continue
             c["bridged"] += 1
@@ -454,11 +458,12 @@ def _game_stats(run_dirs) -> dict:
     dirs = run_dirs if isinstance(run_dirs, (list, tuple)) else [run_dirs]
     rows = []
     for f in (f for rd in dirs for f in Path(rd).glob("workers/inv-*/games.jsonl")):
-        for line in open(f):
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+        with open(f) as fh:
+            for line in fh:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
     statuses: dict[str, int] = {}
     for r in rows:
         statuses[r["status"]] = statuses.get(r["status"], 0) + 1
@@ -473,7 +478,8 @@ def _game_stats(run_dirs) -> dict:
 
 
 def _rl_summary(train_dir: Path) -> dict:
-    rows = [json.loads(line) for line in open(train_dir / "metrics.jsonl")]
+    with open(train_dir / "metrics.jsonl") as f:
+        rows = [json.loads(line) for line in f]
     if not rows:
         return {}
     last = rows[-1]
@@ -698,7 +704,7 @@ def main() -> None:
     # whole 36h — "===== iteration" markers, guard text — starving the log
     # watcher; subprocess output interleaved fine (own fds). Found 2026-07-25.
     sys.stdout.reconfigure(line_buffering=True)
-    monitor = open(out / "monitor.jsonl", "a", buffering=1)
+    monitor = open(out / "monitor.jsonl", "a", buffering=1)  # noqa: SIM115 -- long-lived monitor append handle
     (out / "loop_config.json").write_text(json.dumps(vars(args), indent=2))
     if not args.no_inhibit:
         _sleep_inhibitor(args.name)  # dies with the driver (PDEATHSIG)

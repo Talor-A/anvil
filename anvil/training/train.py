@@ -219,7 +219,7 @@ def main() -> None:
 
     torch.manual_seed(a.seed)
     device = "cuda"
-    out_dir = Path(a.out or f"data/training/run-{_dt.datetime.now():%Y%m%d-%H%M%S}")
+    out_dir = Path(a.out or f"data/training/run-{_dt.datetime.now(_dt.UTC):%Y%m%d-%H%M%S}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     methods = default_methods()
@@ -265,7 +265,7 @@ def main() -> None:
     }
     del config["out"]
     (out_dir / "config.json").write_text(json.dumps(config, indent=1, default=str) + "\n")
-    metrics = open(out_dir / "metrics.jsonl", "a")
+    metrics = open(out_dir / "metrics.jsonl", "a")  # noqa: SIM115 -- long-lived metrics append handle closed at end of main
     print(f"[train] {n_params / 1e6:.1f}M params -> {out_dir}")
 
     step = 0

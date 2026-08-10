@@ -370,7 +370,7 @@ def sweep(args: argparse.Namespace) -> None:
             f"best N={best['n_unfreeze']} lr={best['lr']:g} "
             f"holdout {best['holdout_spearman']} vs gate {RIDGE_PLATEAU}",
         )
-    except Exception:
+    except Exception:  # noqa: BLE001,S110 -- notification failure must not mask probe exit code
         pass
 
 
@@ -435,7 +435,7 @@ def build(args: argparse.Namespace) -> None:
             "chosen_seed": chosen["seed"],
             "inner_val": chosen["best_inner_val"],
             "holdout_spearman_report": chosen["holdout_spearman"],
-            "created": _dt.date.today().isoformat(),
+            "created": _dt.datetime.now(_dt.UTC).date().isoformat(),
             "note": "CRITIC ckpt — ranking-fine-tuned trunk top-N; never "
             "serve policy from it (value-tower discipline, "
             "ADR-0046/user 2026-08-08)",

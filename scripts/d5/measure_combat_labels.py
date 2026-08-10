@@ -86,7 +86,7 @@ def main() -> None:
     for g in store.game_indices()[: a.max_games]:
         try:
             traj = store.game(g)
-        except Exception:
+        except Exception:  # noqa: BLE001 -- undecodable frame: count and keep going
             st["undecodable_game"] += 1
             continue
         games += 1

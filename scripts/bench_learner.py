@@ -80,11 +80,12 @@ class GpuSampler(threading.Thread):
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    check=False,
                 ).stdout.strip()
                 u, m = out.split(",")
                 self.util.append(float(u))
                 self.mem.append(float(m))
-            except Exception:
+            except (OSError, ValueError):
                 pass
             self.stop.wait(0.5)
 
@@ -133,7 +134,7 @@ def arm(seg: int, workers: int, traj: int, scratch: Path) -> dict:
     sampler = GpuSampler()
     sampler.start()
     t0 = time.monotonic()
-    p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=False)
     elapsed = time.monotonic() - t0
     sampler.stop.set()
     sampler.join(timeout=3)
@@ -196,6 +197,7 @@ def main() -> None:
         ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     print(f"[bench] GPU at start: {free}")
     print(

@@ -316,7 +316,7 @@ def test_undecodable_frame_quarantined(tmp_path):
         )
 
     store = TrajectoryStore(tmp_path)
-    with pytest.raises(Exception):
+    with pytest.raises((KeyError, ValueError, json.JSONDecodeError)):
         list(store.games())  # strict by default
     assert [t.game_index for t in store.games(skip_undecodable=True)] == [0]
 

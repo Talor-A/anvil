@@ -41,7 +41,7 @@ def _get(url: str) -> str:
 
 
 def _today() -> str:
-    return _dt.date.today().isoformat()
+    return _dt.datetime.now(_dt.UTC).date().isoformat()
 
 
 # --- mtgtop8 ---

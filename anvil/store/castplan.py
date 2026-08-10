@@ -88,7 +88,7 @@ def parse_ret(ret: Any) -> list[CastPlan] | None:
     if isinstance(ret, dict):  # defensive: a bare object instead of a list
         ret = [ret]
     if not isinstance(ret, list):
-        raise ValueError(f"priority ret is neither null nor a list: {ret!r}")
+        raise TypeError(f"priority ret is neither null nor a list: {ret!r}")
     return [parse_plan(v) for v in ret]
 
 
@@ -211,9 +211,8 @@ def validate_game(traj: GameTrajectory, report: ValidationReport) -> None:
                         report.error(g, seq, f"target e={ref['e']} not in observation")
                     if "pi" in ref and not (0 <= ref["pi"] < n_players):
                         report.error(g, seq, f"target pi={ref['pi']} out of range")
-            if structured and plan.host is not None:
-                if plan.host not in {o.get("e") for o in opts}:
-                    report.error(g, seq, f"chosen e={plan.host} not among {len(opts)} options")
+            if structured and plan.host is not None and plan.host not in {o.get("e") for o in opts}:
+                report.error(g, seq, f"chosen e={plan.host} not among {len(opts)} options")
             pending_play.setdefault(dec.get("p"), []).append((seq, plan))
 
     for queue in pending_play.values():
@@ -230,7 +229,7 @@ def validate(store: TrajectoryStore, limit: int | None = None) -> ValidationRepo
     for g in store.game_indices():
         try:
             traj = store.game(g)
-        except Exception as e:  # truncated/corrupt frame: quarantine, keep going
+        except Exception as e:  # noqa: BLE001 -- truncated/corrupt frame: quarantine, keep going
             report.undecodable.append(f"game {g}: {type(e).__name__}: {str(e)[:80]}")
             continue
         validate_game(traj, report)

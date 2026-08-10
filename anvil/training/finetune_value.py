@@ -149,7 +149,7 @@ def main() -> None:
     ck = torch.load(a.ckpt, map_location="cpu", weights_only=False)
     cfg = ck["config"]
     store = a.store or cfg["store"]
-    out_dir = Path(a.out or f"data/training/valuefix-{_dt.datetime.now():%Y%m%d-%H%M%S}")
+    out_dir = Path(a.out or f"data/training/valuefix-{_dt.datetime.now(_dt.UTC):%Y%m%d-%H%M%S}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     methods = default_methods()
@@ -197,7 +197,7 @@ def main() -> None:
         },
     }
     (out_dir / "config.json").write_text(json.dumps(config, indent=1, default=str) + "\n")
-    metrics = open(out_dir / "metrics.jsonl", "a")
+    metrics = open(out_dir / "metrics.jsonl", "a")  # noqa: SIM115 -- long-lived metrics append handle closed at end of main
 
     base = eval_value(net, val, device, a.eval_batches)
     print(

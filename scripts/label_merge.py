@@ -65,10 +65,11 @@ def _load_traces(paths: list[str]) -> dict[tuple, dict[int, float]]:
     conflicting traces mean mixed critic eras, refuse."""
     out: dict[tuple, dict[int, float]] = {}
     for path in paths:
-        for line in Path(path, "traces.jsonl").open():
-            r = json.loads(line)
-            key = (r["store"], r["g"])
-            vals = {t: v for t, v in r["vals"]}
+        with Path(path, "traces.jsonl").open() as f:
+            for line in f:
+                r = json.loads(line)
+                key = (r["store"], r["g"])
+                vals = {t: v for t, v in r["vals"]}
             if key in out and out[key] != vals:
                 raise SystemExit(
                     f"[merge] trace conflict for {key} across "
@@ -87,33 +88,34 @@ def build_rows(
     rows, miss, dupes = [], 0, 0
     for src in label_dirs:
         seen: set = set()
-        for line in Path(src, "drills.jsonl").open():
-            r = json.loads(line)
-            if r["n"] <= 0:
-                continue
-            key = (r["store"], r["g"], r["fired_t"])
-            if key in seen:
-                dupes += 1
-                continue
-            seen.add(key)
-            vals = {k: tr[k].get((r["store"], r["g"]), {}).get(r["fired_t"]) for k in tr}
-            if any(v is None for v in vals.values()):
-                miss += 1
-                continue
-            rows.append(
-                {
-                    "era": era,
-                    "src": Path(src).name,
-                    "store": r["store"],
-                    "g": r["g"],
-                    "t": r["fired_t"],
-                    "wr": r["model_wins"] / r["n"],
-                    "n": r["n"],
-                    "v_era": vals["era"],
-                    "v_d4": vals["d4"],
-                    "deck": r["deck"],
-                }
-            )
+        with Path(src, "drills.jsonl").open() as f:
+            for line in f:
+                r = json.loads(line)
+                if r["n"] <= 0:
+                    continue
+                key = (r["store"], r["g"], r["fired_t"])
+                if key in seen:
+                    dupes += 1
+                    continue
+                seen.add(key)
+                vals = {k: tr[k].get((r["store"], r["g"]), {}).get(r["fired_t"]) for k in tr}
+                if any(v is None for v in vals.values()):
+                    miss += 1
+                    continue
+                rows.append(
+                    {
+                        "era": era,
+                        "src": Path(src).name,
+                        "store": r["store"],
+                        "g": r["g"],
+                        "t": r["fired_t"],
+                        "wr": r["model_wins"] / r["n"],
+                        "n": r["n"],
+                        "v_era": vals["era"],
+                        "v_d4": vals["d4"],
+                        "deck": r["deck"],
+                    }
+                )
     return rows, {"trace_join_misses": miss, "crash_dupes_dropped": dupes}
 
 
@@ -146,7 +148,7 @@ def merge(args: argparse.Namespace) -> None:
         "n_base": len(base),
         "labels": args.labels,
         "traces": {"era": args.trace_era, "d4": args.trace_d4},
-        "created": _dt.date.today().isoformat(),
+        "created": _dt.datetime.now(_dt.UTC).date().isoformat(),
         "n_new_built": len(new_rows),
         "n_new_kept": len(kept),
         "n_refused_holdout_hash": len(refused),

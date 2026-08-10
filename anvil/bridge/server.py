@@ -123,7 +123,7 @@ class _Batcher:
                     s["out"] = {
                         k: (v[i : i + 1] if self.torch.is_tensor(v) else v) for k, v in out.items()
                     }
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- batch inference: per-slot error, never crash the server
                 for s in slots:
                     s["err"] = e
             finally:
@@ -184,7 +184,7 @@ class ModelBackend:
         if sample:
             if not mu_path:
                 raise ValueError("--sample requires --mu-out")
-            self.mu_file = open(mu_path, "a", buffering=1)
+            self.mu_file = open(mu_path, "a", buffering=1)  # noqa: SIM115 -- server holds a long-lived line-buffered append handle
             self.mu_file.write(
                 json.dumps(
                     {
@@ -470,7 +470,7 @@ class DecisionServicer(pb_grpc.DecisionBridgeServicer):
             backend = self.backend
         try:
             resp = backend.answer(req, header, game_seed)
-        except Exception as e:  # loud decline; a silent wrong answer poisons the arm
+        except Exception as e:  # noqa: BLE001 -- model serving: decline loudly rather than crash the worker
             print(f"[server] MODEL ERROR on {req.decision_tag} seq={req.decision_seq}: {e!r}")
             resp = None
         if resp is None:

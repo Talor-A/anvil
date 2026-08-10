@@ -77,7 +77,7 @@ def run_arm(a, purpose: str, games: int, workers: int, points: int, k: int) -> d
         str(a.seed_base),
     ]
     t0 = time.monotonic()
-    p = subprocess.run(cmd, cwd=ROOT)
+    p = subprocess.run(cmd, cwd=ROOT, check=False)
     elapsed = time.monotonic() - t0
     if p.returncode != 0:
         return {"ok": False, "elapsed_s": round(elapsed, 1)}
@@ -98,9 +98,8 @@ def run_arm(a, purpose: str, games: int, workers: int, points: int, k: int) -> d
     rows = list(uniq.values())
     decisive = 0
     if rd is not None and (rd / "games.jsonl").exists():
-        decisive = sum(
-            1 for line in open(rd / "games.jsonl") if json.loads(line).get("status") == "won"
-        )
+        with open(rd / "games.jsonl") as f:
+            decisive = sum(1 for line in f if json.loads(line).get("status") == "won")
     n_ok = sum(1 for r in rows if sum(r["w"]) + r["draw"] > 0)
     ms = sorted(r["ms"] for r in rows)
     copy_ms = sorted(r["copy_ms"] for r in rows)

@@ -262,9 +262,10 @@ def report(a: argparse.Namespace) -> None:
     out = Path(a.manifest)
     manifest = json.loads((out / "manifest.json").read_text())
     cur = {}
-    for line in Path(manifest["curation"]).open():
-        r = json.loads(line)
-        cur[(r["store"], r["g"])] = r
+    with Path(manifest["curation"]).open() as f:
+        for line in f:
+            r = json.loads(line)
+            cur[(r["store"], r["g"])] = r
 
     prefix = "drill" + manifest.get("tag", "")
     joined, missed = [], []
@@ -280,9 +281,10 @@ def report(a: argparse.Namespace) -> None:
         by_game: dict[int, dict] = {}
         for run_dir in run_dirs:
             for lf in glob.glob(f"{run_dir}/workers/*/labels.jsonl"):
-                for line in open(lf):
-                    r = json.loads(line)
-                    c = cur.get((arm["store"], r["i"]))
+                with open(lf) as fh:
+                    for line in fh:
+                        r = json.loads(line)
+                        c = cur.get((arm["store"], r["i"]))
                     if c is None:
                         continue
                     by_game[r["i"]] = {
@@ -461,9 +463,10 @@ def evalset(a: argparse.Namespace) -> None:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     cur_by_key = {}
-    for line in Path(manifest["curation"]).open():
-        c = json.loads(line)
-        cur_by_key[(c["store"], c["g"])] = c
+    with Path(manifest["curation"]).open() as f:
+        for line in f:
+            c = json.loads(line)
+            cur_by_key[(c["store"], c["g"])] = c
     subset = out / "evalset-curation.jsonl"
     with subset.open("w") as f:
         for r in picked:
@@ -541,9 +544,10 @@ def eval_ckpt(a: argparse.Namespace) -> None:
             if run_dir.rsplit("-", 2)[-2] + "-" + run_dir.rsplit("-", 1)[-1] < t0:
                 continue
             for lf in glob.glob(f"{run_dir}/workers/*/labels.jsonl"):
-                for line in open(lf):
-                    r = json.loads(line)
-                    b = baseline.get((arm["store"], r["i"]))
+                with open(lf) as fh:
+                    for line in fh:
+                        r = json.loads(line)
+                        b = baseline.get((arm["store"], r["i"]))
                     if b is None:
                         continue
                     n = sum(r["w"]) + r["draw"]

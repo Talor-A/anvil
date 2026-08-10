@@ -76,7 +76,7 @@ def main() -> None:
             print(f"  ... {gi}/{len(games)} games, windows={c['windows']}")
         try:
             traj = store.game(g)
-        except Exception:
+        except Exception:  # noqa: BLE001 -- undecodable frame: count and keep going
             c["undecodable_games"] += 1
             continue
         split = _split_of(g)

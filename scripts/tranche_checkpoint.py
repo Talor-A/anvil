@@ -190,7 +190,7 @@ def main() -> None:
             f"{int((~ho).sum())} labels -> {mean_s:.4f} "
             f"(vs {POINT_3K6} @3.6K) => {report['verdict']}",
         )
-    except Exception:
+    except Exception:  # noqa: BLE001,S110 -- notification failure must not mask checkpoint exit code
         pass
     sys.exit(0 if go else 2)
 

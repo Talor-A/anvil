@@ -41,7 +41,7 @@ def derived_counts(store_path: str, stem: str) -> dict:
             continue
         try:
             traj = store.game(g)
-        except Exception as e:  # undecodable frame: census still counted it
+        except Exception as e:  # noqa: BLE001 -- undecodable frame: census still counted it
             out["skipped"] += 1
             out.setdefault("undecodable", []).append((g, str(e)[:60]))
             continue
@@ -63,11 +63,12 @@ def derived_counts(store_path: str, stem: str) -> dict:
 def census_counts(run_dir: str) -> dict:
     out = {"priority": 0, "attack": 0, "block": 0}
     for f in glob.glob(f"{run_dir}/workers/inv-*/census.jsonl"):
-        for line in open(f):
-            try:
-                r = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        with open(f) as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
             if r.get("by") != "bridge":
                 continue
             m = r.get("m")

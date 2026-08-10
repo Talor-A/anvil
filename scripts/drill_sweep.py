@@ -75,8 +75,8 @@ def _subset_curation(
         keep -= ho
     subset = out / "subset-curation.jsonl"
     n = 0
-    with subset.open("w") as f:
-        for line in Path(manifest["curation"]).open():
+    with subset.open("w") as f, Path(manifest["curation"]).open() as src:
+        for line in src:
             c = json.loads(line)
             if (c["store"], c["g"]) in keep:
                 f.write(line)

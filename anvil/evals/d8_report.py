@@ -21,13 +21,15 @@ from pathlib import Path
 
 
 def _games(run_dir: Path) -> list[dict]:
-    return [json.loads(l) for l in open(run_dir / "games.jsonl")]
+    with open(run_dir / "games.jsonl") as f:
+        return [json.loads(l) for l in f]
 
 
 def _census(run_dir: Path):
     for f in glob.glob(str(run_dir / "workers" / "*" / "census.jsonl")):
-        for l in open(f):
-            yield json.loads(l)
+        with open(f) as fh:
+            for l in fh:
+                yield json.loads(l)
 
 
 def _wall_s(run_dir: Path) -> float:

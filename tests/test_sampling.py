@@ -113,9 +113,8 @@ def test_batch_composition_invariance(net_and_feat):
         # canonical target picks must agree (padded index spaces differ)
         n1, s1 = int(out1["n_ent"]), int(out1["stop_idx"])
         n2, s2 = int(out2["n_ent"]), int(out2["stop_idx"])
-        ni = ex["entities"].shape[0]
 
-        def canon(picks, n, s):
+        def canon(picks, n, s, ni):
             outp = []
             for t in range(picks.shape[1]):
                 p = int(picks[0, t])
@@ -124,7 +123,9 @@ def test_batch_composition_invariance(net_and_feat):
                 outp.append(p if p < n else ni + (p - n))
             return outp
 
-        assert canon(out1["tgt_picks"], n1, s1) == canon(out2["tgt_picks"], n2, s2)
+        assert canon(out1["tgt_picks"], n1, s1, ex["entities"].shape[0]) == canon(
+            out2["tgt_picks"], n2, s2, ex["entities"].shape[0]
+        )
         assert int(out1["x_cls"][0]) == int(out2["x_cls"][0])
         assert torch.allclose(out1["logp_choice"][0], out2["logp_choice"][0], atol=1e-4)
         assert torch.allclose(out1["logp_tgt"][0], out2["logp_tgt"][0], atol=1e-4)

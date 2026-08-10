@@ -68,7 +68,8 @@ def main() -> None:
     p.add_argument(
         "--out",
         type=Path,
-        default=REPO / f"data/census/run-{_dt.date.today().strftime('%Y%m%d')}-dcpool",
+        default=REPO
+        / f"data/census/run-{_dt.datetime.now(_dt.UTC).date().strftime('%Y%m%d')}-dcpool",
     )
     a = p.parse_args()
     a.out = a.out.resolve()  # lanes run with cwd=FORGE_GUI_DIR; relative paths are the known trap
@@ -113,12 +114,12 @@ def main() -> None:
         lane_sh = a.out / f"lane-{w}.sh"
         lane_sh.write_text("#!/bin/sh\nset -e\n" + "\n".join(script_lines) + "\n")
         lane_sh.chmod(0o755)
-        log = open(a.out / f"lane-{w}.log", "a")
-        lanes.append(
-            subprocess.Popen(
-                ["sh", str(lane_sh)], cwd=FORGE_GUI_DIR, stdout=log, stderr=subprocess.STDOUT
+        with open(a.out / f"lane-{w}.log", "a") as log:
+            lanes.append(
+                subprocess.Popen(
+                    ["sh", str(lane_sh)], cwd=FORGE_GUI_DIR, stdout=log, stderr=subprocess.STDOUT
+                )
             )
-        )
     print(f"{len(pairs)} pairs x {a.games_per_pair} games, {a.workers} lanes -> {a.out}")
     rcs = [lane.wait() for lane in lanes]
     print(f"lanes done, exit codes {rcs}")

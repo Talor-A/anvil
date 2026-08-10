@@ -86,7 +86,8 @@ def test_plan_merges_and_pins(tmp_path, src_arm):
     ):
         assert arm[k] == SRC_CFG[k], k
 
-    lines = [ln for ln in open(arm["drillfile"]) if ln.strip() and not ln.startswith("#")]
+    with open(arm["drillfile"]) as f:
+        lines = [ln for ln in f if ln.strip() and not ln.startswith("#")]
     # Same-game windows merge, sorted; games sorted.
     assert lines == ["5 4,9\n", "7 13\n"]
 
@@ -95,7 +96,8 @@ def test_plan_turn_offset_clamps(tmp_path, src_arm):
     rows = [{"store": src_arm.name, "g": 0, "seed": 1, "crash_from_turn": 2}]
     out = tmp_path / "plan"
     m = _plan(_curation(tmp_path, rows), out, k=8, turn_offset=-5)
-    lines = [ln for ln in open(m["arms"][0]["drillfile"]) if not ln.startswith("#")]
+    with open(m["arms"][0]["drillfile"]) as f:
+        lines = [ln for ln in f if not ln.startswith("#")]
     assert lines == ["0 1\n"]  # 2-5 clamps to 1, never 0 or negative
 
 
@@ -104,7 +106,8 @@ def test_plan_peak_anchor(tmp_path, src_arm):
     out = tmp_path / "plan"
     m = _plan(_curation(tmp_path, rows), out, anchor="peak", turn_offset=-1)
     assert m["anchor"] == "peak" and m["turn_offset"] == -1
-    lines = [ln for ln in open(m["arms"][0]["drillfile"]) if not ln.startswith("#")]
+    with open(m["arms"][0]["drillfile"]) as f:
+        lines = [ln for ln in f if not ln.startswith("#")]
     assert lines == ["3 7\n"]  # peak 8 - 1, crash turn ignored
 
 
@@ -334,7 +337,8 @@ def test_plan_consumes_selection(tmp_path, src_arm):
     sel = tmp_path / "sel" / "selection.jsonl"
     assert [json.loads(l)["drill_turn"] for l in sel.open()] == [11]
     m = _plan(sel, tmp_path / "plan", anchor="selected")
-    lines = [ln for ln in open(m["arms"][0]["drillfile"]) if not ln.startswith("#")]
+    with open(m["arms"][0]["drillfile"]) as f:
+        lines = [ln for ln in f if not ln.startswith("#")]
     assert lines == ["5 11\n"]  # the selected turn, not crash or peak
 
 
