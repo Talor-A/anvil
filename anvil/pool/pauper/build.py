@@ -17,6 +17,7 @@ from anvil.pool import forge_db, pool_dir
 from anvil.pool.pauper import decklist
 from anvil.pool.pauper.decklist import ShapeError, deck_from_export
 from anvil.pool.pauper.fetch import latest_banlist
+from anvil.schemas.manifests import DeckEntry, ExcludedDeck, PoolEntry, PoolManifest
 
 POOL_DIR = pool_dir("pauper")
 RAW_DECKS_DIR = POOL_DIR / "raw" / "decks"
@@ -49,15 +50,19 @@ def build() -> dict:
         )
     banned = {forge_db.normalize(c["name"]) for c in banlist["cards"]}
 
-    decks_out, excluded, unresolved_freq = [], [], {}
-    pool: dict[str, dict] = {}  # forge name -> {sources, first_seen}
+    decks_out: list[DeckEntry] = []
+    excluded: list[ExcludedDeck] = []
+    unresolved_freq: dict[str, int] = {}
+    pool: dict[str, PoolEntry] = {}  # forge name -> {sources, first_seen}
 
     for path in sorted(RAW_DECKS_DIR.glob("*.txt"), key=lambda p: int(p.stem)):
         deck_id = int(path.stem)
         meta = json.loads(path.with_suffix(".json").read_text())
 
         def exclude(reason: str, deck_id=deck_id, meta=meta) -> None:
-            excluded.append({"deck_id": deck_id, "reason": reason, "url": meta.get("source_url")})
+            excluded.append(
+                ExcludedDeck(deck_id=deck_id, reason=reason, url=meta.get("source_url"))
+            )
 
         try:
             deck = deck_from_export(deck_id, path.read_text(), meta)
@@ -88,24 +93,25 @@ def build() -> dict:
         main = [(c, resolved[n]) for c, n in deck.main]
         side = [(c, resolved[n]) for c, n in deck.sideboard]
         decks_out.append(
-            {
-                "deck_id": deck_id,
-                "file": f"pau-{deck_id}.dck",
-                "event_title": meta.get("event_title"),
-                "event_date": meta.get("event_date"),
-                "source_url": meta.get("source_url"),
-            }
+            DeckEntry(
+                deck_id=deck_id,
+                commanders=[],
+                file=f"pau-{deck_id}.dck",
+                event_title=meta.get("event_title"),
+                event_date=meta.get("event_date"),
+                source_url=meta.get("source_url"),
+            )
         )
         DECKS_OUT_DIR.mkdir(parents=True, exist_ok=True)
         (DECKS_OUT_DIR / f"pau-{deck_id}.dck").write_text(
             decklist.to_dck(f"pau-{deck_id}", main, side)
         )
         for name in {n for _, n in main} | {n for _, n in side}:
-            entry = pool.setdefault(name, {"sources": [], "first_seen": None})
-            entry["sources"].append(deck_id)
+            entry = pool.setdefault(name, PoolEntry(sources=[], first_seen=None))
+            entry.sources.append(deck_id)
             date = meta.get("event_date")
-            if date and (entry["first_seen"] is None or date < entry["first_seen"]):
-                entry["first_seen"] = date
+            if date and (entry.first_seen is None or date < entry.first_seen):
+                entry.first_seen = date
 
     flex_unresolved = []
     for name in _load_flex():
@@ -113,9 +119,9 @@ def build() -> dict:
         if hit is None:
             flex_unresolved.append(name)
         elif forge_db.normalize(hit) in banned:
-            excluded.append({"deck_id": None, "reason": f"flex card banned: {hit}"})
+            excluded.append(ExcludedDeck(deck_id=None, reason=f"flex card banned: {hit}"))
         else:
-            pool.setdefault(hit, {"sources": [], "first_seen": None})["sources"].append("flex")
+            pool.setdefault(hit, PoolEntry(sources=[], first_seen=None)).sources.append("flex")
 
     manifest = {
         "format": "pauper",
@@ -133,6 +139,8 @@ def build() -> dict:
         },
         "excluded": excluded,
     }
+    # validate shape before the content hash locks it in
+    PoolManifest(**manifest)
     blob = json.dumps(manifest, sort_keys=True).encode()
     pool_hash = hashlib.sha256(blob).hexdigest()
     manifest["pool_version"] = pool_hash[:8]
@@ -171,6 +179,6 @@ def _write_report(
     if manifest["excluded"]:
         lines += ["## Excluded decks", ""]
         for e in manifest["excluded"]:
-            lines.append(f"- {e['deck_id']}: {e['reason']}")
+            lines.append(f"- {e.deck_id}: {e.reason}")
         lines.append("")
     (POOL_DIR / "report.md").write_text("\n".join(lines))
