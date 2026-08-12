@@ -235,7 +235,7 @@ def iteration_batches(
     h0 = n_heur // 2
     h1 = n_heur - h0
     n_mirror = games - n_heur
-    out = [(f"{name}-i{k:03d}", n_mirror, 0, None)]
+    out: list[tuple[str, int, int, "int | None"]] = [(f"{name}-i{k:03d}", n_mirror, 0, None)]
     if h0:
         out.append((f"{name}-i{k:03d}h0", h0, n_mirror, 0))
     if h1:
