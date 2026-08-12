@@ -183,6 +183,13 @@ def batch_chunk(games: int, workers: int, chunk: int) -> int:
     return max(1, min(chunk, games // (2 * workers)))
 
 
+def _write_pairs_file(path: Path, pair: tuple[str, str], n: int) -> None:
+    """Alternating two-deck pair schedule so the model sees both seat
+    assignments uniformly across a long index range."""
+    a, b = pair
+    path.write_text("".join(f"{a}\t{b}\n" if i % 2 == 0 else f"{b}\t{a}\n" for i in range(n)))
+
+
 def _launch_games(
     purpose: str, games: int, start_index: int, a, bridge_seats: "int | None" = None
 ) -> Path:
@@ -192,11 +199,8 @@ def _launch_games(
         "-m",
         "anvil.bridge.harness",
         "launch",
-        "--pool",
         "--games",
         str(games),
-        "--games-per-pair",
-        str(a.games_per_pair),
         "--start-index",
         str(start_index),
         "--workers",
@@ -205,6 +209,8 @@ def _launch_games(
         str(batch_chunk(games, a.workers, a.chunk)),
         "--bridge",
         f"grpc:localhost:{a.port}",
+        "--format",
+        a.format,
         "--obs",
         "--census",
         "--purpose",
@@ -212,6 +218,12 @@ def _launch_games(
         "--seed-base",
         str(a.seed_base),
     ]
+    if a.deck_pair:
+        # fixed two-deck mode: alternating pairs file gives both seat
+        # assignments over the full index range.
+        cmd += ["--pairs-file", str(a.gen_pairs_file), "--games-per-pair", "1"]
+    else:
+        cmd += ["--pool", "--pool-format", a.pool_format, "--games-per-pair", str(a.games_per_pair)]
     if bridge_seats is not None:
         # §6d mixed-opponent batch: only this seat is model-driven; the
         # other seat is the heuristic AI (the eval-arm configuration).
@@ -509,6 +521,25 @@ def main() -> None:
     )
     ap.add_argument("--iterations", type=int, required=True)
     ap.add_argument("--games", type=int, default=480, help="games per iteration")
+    ap.add_argument(
+        "--format",
+        default="Commander",
+        help="Forge GameType passed to -f (e.g. Commander, Constructed)",
+    )
+    ap.add_argument(
+        "--pool-format",
+        choices=["dc", "pauper"],
+        default="dc",
+        help="pool manifest format when using --pool",
+    )
+    ap.add_argument(
+        "--deck-pair",
+        nargs=2,
+        default=None,
+        help="fixed two-deck pair for generation; writes an alternating "
+        "pairs file so the model sees both seat assignments (use with "
+        "--format Constructed for Pauper)",
+    )
     ap.add_argument("--games-per-pair", type=int, default=2)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--chunk", type=int, default=30)
@@ -627,6 +658,13 @@ def main() -> None:
     ap.add_argument("--value-weight", type=float, default=0.5)
     ap.add_argument("--traj-per-step", type=int, default=4)
     ap.add_argument(
+        "--max-traj",
+        type=int,
+        default=0,
+        help="cap rl.py training trajectories per iteration (0 = whole store). "
+        "Use a small number for smokes; a capped checkpoint must never be promoted.",
+    )
+    ap.add_argument(
         "--arms-every", type=int, default=5, help="arms vs heuristic every N iterations (0 = off)"
     )
     ap.add_argument(
@@ -693,12 +731,31 @@ def main() -> None:
 
     out = Path("data/training") / args.name
     out.mkdir(parents=True, exist_ok=True)
+
     state_path = out / "loop_state.json"
     state = (
         json.loads(state_path.read_text())
         if state_path.exists()
         else {"iteration": 0, "ckpt": args.ckpt, "stores": [], "start_index": 0}
     )
+
+    # Fixed two-deck mode: generate over-provisioned alternating pair
+    # schedules for generation and arms. The harness maps game index i to
+    # pair (i // gpp) % n_pairs, so gpp=1 with a long file keeps both seat
+    # assignments interleaved across every batch.
+    if args.deck_pair:
+        pair = tuple(args.deck_pair)
+        max_idx = state["start_index"] + args.games * (args.iterations + 1)
+        gen_pairs = out / "gen-pairs.txt"
+        _write_pairs_file(gen_pairs, pair, max_idx)
+        args.gen_pairs_file = str(gen_pairs)
+        if args.arms_pairs is None:
+            arm_pairs = out / "arm-pairs.txt"
+            _write_pairs_file(arm_pairs, pair, 2 * args.arms_games)
+            args.arms_pairs = str(arm_pairs)
+    else:
+        args.gen_pairs_file = None
+
     # Line-buffer our own narration: under a detached launch (stdout -> log
     # file) block buffering held EVERY driver print in memory for run-8's
     # whole 36h — "===== iteration" markers, guard text — starving the log
@@ -877,6 +934,8 @@ def main() -> None:
                     str(_auto_seg(args.rl_seg)),
                     "--workers",
                     str(args.rl_workers),
+                    "--max-traj",
+                    str(args.max_traj),
                     "--penalty",
                     str(args.penalty),
                     "--epochs",
@@ -998,8 +1057,8 @@ def main() -> None:
                         "-m",
                         "anvil.bridge.harness",
                         "launch",
-                        "--pairs-file",
-                        args.arms_pairs,
+                        "--format",
+                        args.format,
                         "--games",
                         str(args.arms_games),
                         "--workers",
@@ -1017,6 +1076,10 @@ def main() -> None:
                         "--bridge-seats",
                         str(seat),
                     ]
+                    if args.deck_pair:
+                        arm_cmd += ["--pairs-file", args.arms_pairs, "--games-per-pair", "1"]
+                    else:
+                        arm_cmd += ["--pairs-file", args.arms_pairs]
                     if args.reask:
                         arm_cmd.append("--reask")
                     _run(arm_cmd)
