@@ -196,12 +196,12 @@ class Run:
         if m.fork_obs:
             # M4 D3: completions become store frames of their own
             cmd += ["-forkobs"]
-        if m.get("force_branch"):
+        if getattr(m, "force_branch", None):
             # M7 D2: act/hold paired branches at drilled fork points
             cmd += ["-forcebranch"]
-        if m.get("force_seq"):
+        if getattr(m, "force_seq", None):
             # M7 D2 sequence probe: natural/hold-N/act-N paired arms
-            cmd += ["-forceseq", str(m["force_seq"])]
+            cmd += ["-forceseq", str(m.force_seq)]
         (wdir / "cmd.txt").write_text(" ".join(cmd) + "\n")
         out = open(wdir / "out.log", "a")
         return subprocess.Popen(cmd, cwd=FORGE_GUI_DIR, stdout=out, stderr=subprocess.STDOUT)
