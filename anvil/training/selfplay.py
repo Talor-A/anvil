@@ -665,6 +665,20 @@ def main() -> None:
         "Use a small number for smokes; a capped checkpoint must never be promoted.",
     )
     ap.add_argument(
+        "--turn-penalty",
+        type=float,
+        default=0.0,
+        help="per-turn reward penalty for wins above --min-turns "
+        "(winner reward = max(0, 1 - turn_penalty * max(0, turns - min_turns))). "
+        "A reward change is an RL-chain boundary — start a fresh run.",
+    )
+    ap.add_argument(
+        "--min-turns",
+        type=int,
+        default=3,
+        help="baseline turn count for --turn-penalty speed shaping.",
+    )
+    ap.add_argument(
         "--arms-every", type=int, default=5, help="arms vs heuristic every N iterations (0 = off)"
     )
     ap.add_argument(
@@ -942,6 +956,10 @@ def main() -> None:
                     str(args.epochs),
                     "--seed",
                     str(k),
+                    "--turn-penalty",
+                    str(args.turn_penalty),
+                    "--min-turns",
+                    str(args.min_turns),
                 ]
                 + (["--critic-ckpt", str(critic_ckpt)] if critic_ckpt else [])
             )

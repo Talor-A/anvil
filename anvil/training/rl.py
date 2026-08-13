@@ -298,18 +298,27 @@ def rejected_events(decs: list, i: int, dec: dict, rec: dict, aux: dict) -> int:
     return n
 
 
-def game_trajectories(store, feat, g: int, full_vis: bool = False):
+def game_trajectories(
+    store,
+    feat,
+    g: int,
+    full_vis: bool = False,
+    turn_penalty: float = 0.0,
+    min_turns: int = 3,
+):
     """Per-seat mu-covered trajectories of one stored game, serve-identical
     windows via the featurizer path (store_wire_hist -> Featurizer.example ->
     apply_mu_labels).
 
     Returns (trajs, skip_reason): trajs = [(seat, [(ex, rec), ...], reward,
     rej, exs_fv)]; reward per §3d — win 1, loss/draw/cap 0 (a stalling leader
-    forfeits the +1); skip_reason set (and trajs empty) for crash/no-outcome
-    games, whose returns are engine artifacts, and for games without mu
-    records. full_vis (§6f): exs_fv = the asymmetric critic's windows (same
-    decisions, info-set gate bypassed) — consumed ONLY by the frozen critic's
-    value forward in pass A, never by the policy passes; [] when off."""
+    forfeits the +1), optionally shaped by game length (turn_penalty > 0:
+    winner reward = max(0, 1 - turn_penalty * max(0, turns - min_turns))).
+    skip_reason set (and trajs empty) for crash/no-outcome games, whose
+    returns are engine artifacts, and for games without mu records.
+    full_vis (§6f): exs_fv = the asymmetric critic's windows (same decisions,
+    info-set gate bypassed) — consumed ONLY by the frozen critic's value
+    forward in pass A, never by the policy passes; [] when off."""
     from anvil.bridge.featurize import store_wire_hist
 
     mu = store.mu_for_game(g)
@@ -322,6 +331,7 @@ def game_trajectories(store, feat, g: int, full_vis: bool = False):
     if status not in ("won", "draw"):
         return [], f"status:{status}"
     winner = store.winner_seat(g)
+    turns = (outcome or {}).get("turns")
     traj = store.game(g)
     by_seat: dict[int, list] = {}
     prior = []
@@ -344,11 +354,19 @@ def game_trajectories(store, feat, g: int, full_vis: bool = False):
             )
             by_seat.setdefault(dec["p"], []).append((ex, rec, rej, ex_fv))
         prior.append(dec)
+
+    def _seat_reward(p: int) -> float:
+        if winner != p:
+            return 0.0
+        if turn_penalty <= 0.0 or turns is None:
+            return 1.0
+        return max(0.0, 1.0 - turn_penalty * max(0, turns - min_turns))
+
     return [
         (
             p,
             [(e, r) for e, r, _, _ in items],
-            1.0 if winner == p else 0.0,
+            _seat_reward(p),
             [rj for _, _, rj, _ in items],
             [fv for _, _, _, fv in items] if full_vis else [],
         )
@@ -393,6 +411,8 @@ class RlTrajectories(torch.utils.data.IterableDataset):
         epochs: int = 1,
         full_vis: bool = False,
         seg: int = 256,
+        turn_penalty: float = 0.0,
+        min_turns: int = 3,
     ):
         self.stores = stores
         self.weights = weights
@@ -401,6 +421,8 @@ class RlTrajectories(torch.utils.data.IterableDataset):
         self.seed = seed
         self.epochs = epochs
         self.full_vis = full_vis
+        self.turn_penalty = turn_penalty
+        self.min_turns = min_turns
         # Collate WORKER-SIDE at exactly the learner's seg size (2026-07-26).
         # Yielding per-window example dicts shipped ~20 tensors x hundreds of
         # windows x2 (masked + fv) through the DataLoader's shm+pickle path for
@@ -433,7 +455,14 @@ class RlTrajectories(torch.utils.data.IterableDataset):
             for si, g in schedule:
                 if (g * 2654435761 + si) % nw != wid:
                     continue
-                trajs, skip = game_trajectories(opened[si], feat, g, full_vis=self.full_vis)
+                trajs, skip = game_trajectories(
+                    opened[si],
+                    feat,
+                    g,
+                    full_vis=self.full_vis,
+                    turn_penalty=self.turn_penalty,
+                    min_turns=self.min_turns,
+                )
                 if skip is not None:
                     yield {"skip": skip, "g": g}
                     continue
@@ -612,6 +641,21 @@ def main() -> None:
     ap.add_argument("--clip", type=float, default=1.0)
     ap.add_argument("--log-every", type=int, default=20)
     ap.add_argument("--device", default=get_torch_device())
+    ap.add_argument(
+        "--turn-penalty",
+        type=float,
+        default=0.0,
+        help="per-turn reward penalty for wins above --min-turns "
+        "(0 = flat win/loss reward). Winner reward becomes "
+        "max(0, 1 - turn_penalty * max(0, turns - min_turns)).",
+    )
+    ap.add_argument(
+        "--min-turns",
+        type=int,
+        default=3,
+        help="baseline turn count for speed reward shaping "
+        "(wins at or below this turn get full reward).",
+    )
     args = ap.parse_args()
 
     stores = args.store.split(",")
@@ -679,6 +723,8 @@ def main() -> None:
         epochs=args.epochs,
         full_vis=critic is not None,
         seg=args.seg,
+        turn_penalty=args.turn_penalty,
+        min_turns=args.min_turns,
     )
     loader = torch.utils.data.DataLoader(
         ds,
