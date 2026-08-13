@@ -19,11 +19,14 @@ composite_logp(fwd, batch) therefore serves three jobs with one body:
 
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.nn.functional as F
 
 from anvil.schemas.tensors import Batch, Example
 from anvil.torch.utils import get_torch_device
+from anvil.trackio_logger import finish, init_run, log
 from anvil.training.dataset import TASKS, collate, default_methods
 
 
@@ -687,6 +690,15 @@ def main() -> None:
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.wd)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    tb_run = init_run(
+        name=os.environ.get("TRACKIO_NAME") or out_dir.name,
+        group="rl-learner",
+        config=vars(args),
+        resume="allow",
+    )
+    del tb_run  # the active run is process-global for the Trackio logger
+
     rl_cfg = {
         **cfg,
         "rl": {
@@ -910,6 +922,11 @@ def main() -> None:
                     "phase": {k: round(v / wall, 3) for k, v in sorted(tprof.items())},
                 }
                 metrics.write(json.dumps(row) + "\n")
+                trackio_row = {k: v for k, v in row.items() if k != "step"}
+                iteration = os.environ.get("TRACKIO_ITERATION")
+                if iteration is not None:
+                    trackio_row["iteration"] = int(iteration)
+                log(trackio_row, step=step)
                 print(f"[rl] {row}")
                 acc = {}
             if step % 200 == 0:
@@ -928,6 +945,7 @@ def main() -> None:
         f"[rl] wall {wall:.0f}s; phase shares "
         + ", ".join(f"{k} {v / wall:.1%}" for k, v in sorted(tprof.items()))
     )
+    finish()
 
 
 if __name__ == "__main__":

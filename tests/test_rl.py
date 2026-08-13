@@ -309,6 +309,7 @@ def test_drill_eval_phase_idempotent_and_picks_new_report(tmp_path, monkeypatch)
 
     monkeypatch.setattr(selfplay, "_run", fake_run)
     monkeypatch.setattr(selfplay, "_notify", lambda *a, **k: None)
+    monkeypatch.setattr(selfplay, "log", lambda metrics, step=None: None)
     args = argparse.Namespace(drill_eval_set=str(es), port=1, workers=2, name="t")
     state = {"ckpt": "ckpt.pt"}
 

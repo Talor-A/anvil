@@ -30,6 +30,9 @@ import time
 from io import TextIOWrapper
 from pathlib import Path
 
+import trackio as _trackio
+
+from anvil.trackio_logger import alert, child_env, finish, init_run, log
 from anvil.training.notify import notify as _shared_notify
 from anvil.training.notify import watch_register as _watch_register
 from anvil.training.notify import watch_unregister as _watch_unregister
@@ -168,9 +171,10 @@ def _stop_server(proc) -> None:
         proc.kill()
 
 
-def _run(cmd: list[str]) -> None:
+def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     print(f"[selfplay] $ {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    run_env = {**os.environ, **env} if env else os.environ
+    subprocess.run(cmd, check=True, env=run_env)
 
 
 def batch_chunk(games: int, workers: int, chunk: int) -> int:
@@ -366,6 +370,14 @@ def _drill_eval_phase(args, state: dict, k: int, it_dir: Path) -> None:
         f"[selfplay] iteration {k}: drill-eval paired deltas {deltas} "
         f"(overall {rep['winrate']} vs baseline {rep['baseline']})"
     )
+    drill_metrics: dict[str, float | int | None] = {
+        "drill_eval.winrate": rep.get("winrate"),
+        "drill_eval.baseline": rep.get("baseline"),
+        "drill_eval.drills": rep.get("drills"),
+        "drill_eval.planned": rep.get("planned"),
+        **{f"drill_eval.delta.{b}": d for b, d in deltas.items()},
+    }
+    log({mk: mv for mk, mv in drill_metrics.items() if mv is not None}, step=k)
     _notify(f"anvil {args.name}: drill-eval iter {k}", json.dumps(deltas))
 
 
@@ -388,10 +400,10 @@ def _census_tallies(run_dirs) -> dict:
     veto (string reason) / pick=="pass" / else cast. Accepts one run dir or a
     list (§6d iteration batch groups); the by=bridge filter keeps every rate
     model-seat-only regardless of opponent mix."""
-    from collections import Counter
+    from collections import defaultdict
 
     dirs = run_dirs if isinstance(run_dirs, (list, tuple)) else [run_dirs]
-    c: Counter[str] = Counter()
+    c: defaultdict[str, float] = defaultdict(float)
     for f in (f for rd in dirs for f in Path(rd).glob("workers/inv-*/census.jsonl")):
         for line in open(f):
             try:
@@ -509,6 +521,54 @@ def _rl_summary(train_dir: Path) -> dict:
         "mean": mean,
         "final": last,
     }
+
+
+def _log_iteration_artifacts(
+    args, out: Path, it_dir: Path, k: int, new_ckpt: Path, rl: dict
+) -> None:
+    """Log one accepted iteration as versions of stable artifact lineages.
+
+    Trackio de-duplicates identical manifests, so this is resume-idempotent:
+    re-logging an already-recorded iteration links the existing version rather
+    than creating another one.
+    """
+    metadata = {
+        "iteration": k,
+        "learner_step": rl.get("steps"),
+        "ckpt": str(new_ckpt),
+        "accepted": True,
+    }
+    # Trackio de-duplicates on manifest contents, not metadata. Including this
+    # marker guarantees one version per accepted iteration even if two
+    # consecutive checkpoints (or provenance files) are byte-identical, while
+    # making a retry of the same iteration de-duplicate cleanly.
+    marker = it_dir / "artifact-iteration.json"
+    marker.write_text(json.dumps(metadata, sort_keys=True, indent=2) + "\n")
+
+    ckpt_art = _trackio.Artifact(
+        name=f"{args.name}-checkpoint",
+        type="model",
+        description=f"accepted checkpoints for {args.name}",
+        metadata=metadata,
+    )
+    ckpt_art.add_file(new_ckpt, name="last.pt")
+    ckpt_art.add_file(marker, name="iteration.json")
+    _trackio.log_artifact(ckpt_art, aliases=[f"iter-{k:03d}"])
+
+    prov_art = _trackio.Artifact(
+        name=f"{args.name}-iteration-provenance",
+        type="provenance",
+        description=f"accepted iteration provenance for {args.name}",
+        metadata=metadata,
+    )
+    prov_art.add_file(marker, name="iteration.json")
+    prov_art.add_file(out / "loop_config.json")
+    prov_art.add_file(it_dir / "server.log")
+    for name in ("arms-report.json", "drill-eval.json"):
+        path = it_dir / name
+        if path.exists():
+            prov_art.add_file(path)
+    _trackio.log_artifact(prov_art, aliases=[f"iter-{k:03d}"])
 
 
 def main() -> None:
@@ -777,6 +837,7 @@ def main() -> None:
     assert isinstance(sys.stdout, TextIOWrapper)
     sys.stdout.reconfigure(line_buffering=True)
     monitor = open(out / "monitor.jsonl", "a", buffering=1)
+    init_run(name=args.name, group="selfplay", config=vars(args))
     (out / "loop_config.json").write_text(json.dumps(vars(args), indent=2))
     if not args.no_inhibit:
         _sleep_inhibitor(args.name)  # dies with the driver (PDEATHSIG)
@@ -878,6 +939,12 @@ def main() -> None:
             if (critic_dir / "DONE").exists():
                 print(f"[selfplay] iteration {k}: reusing critic in {critic_dir}")
             else:
+                critic_env = child_env(
+                    args.name,
+                    name=f"{args.name}-critic",
+                    iteration=k,
+                    step_offset=k * (args.critic_steps + 1),
+                )
                 _run(
                     [
                         sys.executable,
@@ -908,7 +975,8 @@ def main() -> None:
                         "50",
                         "--out",
                         str(critic_dir),
-                    ]
+                    ],
+                    env=critic_env,
                 )
                 if not (critic_dir / "last.pt").exists():
                     raise RuntimeError(f"critic phase produced no checkpoint in {critic_dir}")
@@ -921,6 +989,11 @@ def main() -> None:
         if (train_dir / "DONE").exists():
             print(f"[selfplay] iteration {k}: reusing completed training in {train_dir}")
         else:
+            train_env = child_env(
+                args.name,
+                name=f"{args.name}-train",
+                iteration=k,
+            )
             _run(
                 [
                     sys.executable,
@@ -961,7 +1034,8 @@ def main() -> None:
                     "--min-turns",
                     str(args.min_turns),
                 ]
-                + (["--critic-ckpt", str(critic_ckpt)] if critic_ckpt else [])
+                + (["--critic-ckpt", str(critic_ckpt)] if critic_ckpt else []),
+                env=train_env,
             )
         t_train = time.monotonic() - t0
         new_ckpt = train_dir / "last.pt"
@@ -1031,6 +1105,13 @@ def main() -> None:
             "guard": guards,
         }
         monitor.write(json.dumps(row) + "\n")
+        tb_row = {
+            k: v for k, v in row.items() if k not in ("ckpt", "run", "store", "flags", "guard")
+        }
+        tb_row["flags_count"] = len(flags)
+        tb_row["guard_count"] = len(guards)
+        log(tb_row, step=k)
+
         if flags:
             print(f"[selfplay] !!! ANOMALY FLAGS iteration {k}: {flags}")
         if guards:
@@ -1042,6 +1123,8 @@ def main() -> None:
                 f"halt — needs a human)"
             )
             _notify(f"anvil {args.name}: GUARD HALT iter {k}", "; ".join(guards))
+            alert("guard halt", "; ".join(guards), level="error")
+            finish()
             _watch_unregister(args.name)  # deliberate exit — no GONE alert
             sys.exit(3)
 
@@ -1058,7 +1141,6 @@ def main() -> None:
         )
         if critic_ckpt is not None:
             state["critic"] = str(critic_ckpt)
-        state_path.write_text(json.dumps(state, indent=2))
 
         # ---- arms (argmax serve, paired seeds, both seat assignments) ----
         if args.arms_every and (k + 1) % args.arms_every == 0 and args.arms_pairs:
@@ -1115,16 +1197,54 @@ def main() -> None:
                     str(it_dir / "arms-report.json"),
                 ]
             )
+            arm_report = json.loads((it_dir / "arms-report.json").read_text())
+            for arm_name, arm in arm_report.items():
+                arm_metrics = {
+                    "arm": arm_name,
+                    "games": arm.get("games"),
+                    "decisive": arm.get("decisive"),
+                    "crashes": arm.get("crashes"),
+                    "winrate": arm.get("winrate"),
+                    "se": arm.get("se"),
+                    "veto_rate": arm.get("veto_rate"),
+                    "first_veto_rate": arm.get("first_veto_rate"),
+                    "turns_median": arm.get("turns_median"),
+                }
+                if arm.get("ante"):
+                    arm_metrics["ante_corrected_winrate"] = arm["ante"]["corrected_winrate"]
+                    arm_metrics["ante_corrected_se"] = arm["ante"]["corrected_se"]
+                log(
+                    {
+                        f"arms/{arm_name}/{mk}": mv
+                        for mk, mv in arm_metrics.items()
+                        if mv is not None and mk != "arm"
+                    },
+                    step=k,
+                )
 
         # ---- mid-run drill-evalset decomposition (advisory; own server) ----
         if args.drill_eval_every and (k + 1) % args.drill_eval_every == 0:
             _drill_eval_phase(args, state, k, it_dir)
+
+        # Artifact lineage advances only after the checkpoint passed guards and
+        # every iteration-owned report has landed. A Trackio failure is visible
+        # but does not invalidate an otherwise accepted training iteration.
+        try:
+            _log_iteration_artifacts(args, out, it_dir, k, new_ckpt, rl)
+        except Exception as e:
+            print(f"[selfplay] trackio artifact log skipped: {e}")
+
+        # Persist advancement only after all accepted-iteration phases. If the
+        # driver dies during arms, drill eval, or artifact logging, resume
+        # re-enters this iteration and Trackio de-duplicates the same marker.
+        state_path.write_text(json.dumps(state, indent=2))
 
     print(f"[selfplay] loop complete: {state['iteration']} iterations, final ckpt {state['ckpt']}")
     _notify(
         f"anvil {args.name}: COMPLETE",
         f"{state['iteration']} iterations, final ckpt {state['ckpt']}",
     )
+    finish()
     _watch_unregister(args.name)
 
 

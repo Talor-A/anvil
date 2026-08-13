@@ -34,6 +34,7 @@ import argparse
 import datetime as _dt
 import json
 import math
+import os
 import time
 from pathlib import Path
 
@@ -42,6 +43,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from anvil.torch.utils import get_torch_device
+from anvil.trackio_logger import finish, init_run, log
 from anvil.training.dataset import PriorityWindows, collate, default_methods
 from anvil.training.train import build_net
 
@@ -153,6 +155,13 @@ def main() -> None:
     out_dir = Path(a.out or f"data/training/valuefix-{_dt.datetime.now():%Y%m%d-%H%M%S}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    init_run(
+        name=os.environ.get("TRACKIO_NAME") or out_dir.name,
+        group="value-finetune",
+        config=vars(a),
+        resume="allow",
+    )
+
     methods = default_methods()
     net = build_net(
         cfg["embed"], cfg["pool_manifest"], len(methods), n_sa=cfg.get("sa_vocab_size", 0)
@@ -206,7 +215,17 @@ def main() -> None:
         f"bce {base['value_bce']:.4f} auc {base['value_auc']:.4f} "
         f"(n={base['n_value']}, pred_std {base['pred_std']:.4f})"
     )
+    step_offset = int(os.environ.get("TRACKIO_STEP_OFFSET", "0"))
+    iteration = os.environ.get("TRACKIO_ITERATION")
+
+    def trackio_metrics(row: dict, step: int) -> None:
+        logged = dict(row)
+        if iteration is not None:
+            logged["iteration"] = int(iteration)
+        log(logged, step=step_offset + step)
+
     metrics.write(json.dumps({"step": 0, "split": "val", **base}) + "\n")
+    trackio_metrics(base, 0)
     metrics.flush()
 
     step, t0, seen = 0, time.time(), 0
@@ -239,6 +258,15 @@ def main() -> None:
                     )
                     + "\n"
                 )
+                trackio_metrics(
+                    {
+                        "value_loss": loss_val,
+                        "lr": lr_at(step),
+                        "windows": seen,
+                        "wall_s": round(time.time() - t0, 1),
+                    },
+                    step,
+                )
                 metrics.flush()
             if step % 1000 == 0:
                 print(
@@ -249,6 +277,7 @@ def main() -> None:
                 nb = a.final_eval_batches if step == a.steps else a.eval_batches
                 ev = eval_value(net, val, device, nb)
                 metrics.write(json.dumps({"step": step, "split": "val", **ev}) + "\n")
+                trackio_metrics(ev, step)
                 metrics.flush()
                 print(
                     f"[vfix] eval step {step}: bce {ev['value_bce']:.4f} "
@@ -257,6 +286,7 @@ def main() -> None:
                 torch.save(
                     {"step": step, "model": net.state_dict(), "config": config}, out_dir / "last.pt"
                 )
+    finish()
     print(f"[vfix] done: {step} steps, {seen} outcome windows, {(time.time() - t0) / 60:.1f} min")
 
 
