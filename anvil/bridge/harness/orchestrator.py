@@ -35,6 +35,7 @@ from pathlib import Path
 
 from anvil.bridge.harness.seeds import game_seed
 from anvil.schemas.manifests import RunManifest
+from anvil.utils.paths import stamp_name
 
 FORGE_DIR = Path(os.environ.get("FORGE_DIR", Path.home() / "Everything/Projects/forge"))
 FORGE_GUI_DIR = FORGE_DIR / "forge-gui"
@@ -285,7 +286,7 @@ class Run:
 
 def launch(a) -> Path:
     jar = _find_jar()
-    run_id = f"{a.purpose}-{_dt.datetime.now():%Y%m%d-%H%M%S}"
+    run_id = stamp_name(a.purpose)
     run_dir = RUNS_DIR / run_id
     (run_dir / "workers").mkdir(parents=True)
 

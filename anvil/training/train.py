@@ -10,7 +10,6 @@ config + data pins.
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import json
 import math
 import time
@@ -32,6 +31,7 @@ from anvil.policy.model import AnvilNet
 from anvil.schemas.manifests import TrainConfig
 from anvil.torch.utils import get_torch_device
 from anvil.training.dataset import PriorityWindows, collate, default_methods, default_sa_vocab
+from anvil.utils.paths import stamp_name
 
 REPO = Path(__file__).parents[1]
 
@@ -221,7 +221,7 @@ def main() -> None:
 
     torch.manual_seed(a.seed)
     device = get_torch_device()
-    out_dir = Path(a.out or f"data/training/run-{_dt.datetime.now():%Y%m%d-%H%M%S}")
+    out_dir = Path(a.out or f"data/training/{stamp_name('run')}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     methods = default_methods()

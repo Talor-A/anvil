@@ -57,7 +57,7 @@ def main() -> None:
         try:
             for seat in (0, 1):
                 purpose = f"cycle3-s{seat}"
-                before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+                before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
                 _run(
                     [
                         sys.executable,
@@ -86,7 +86,7 @@ def main() -> None:
                         str(SEED_BASE),
                     ]
                 )
-                new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+                new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
                 if len(new) != 1:
                     raise RuntimeError(f"expected one run dir: {new}")
                 run_dirs.append(Path(new.pop()))

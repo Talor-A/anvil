@@ -68,7 +68,7 @@ def main() -> None:
     try:
         for seat in (0, 1):
             purpose = f"{a.name}arm-s{seat}"
-            before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+            before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
             _run(
                 [
                     sys.executable,
@@ -100,7 +100,7 @@ def main() -> None:
                     "--reask",
                 ]
             )
-            new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+            new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
             if len(new) != 1:
                 raise RuntimeError(f"expected one new run dir, got {new}")
             arm_dirs.append(Path(new.pop()))

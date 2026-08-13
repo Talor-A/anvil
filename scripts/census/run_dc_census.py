@@ -20,7 +20,6 @@ Decks must be installed first: uv run python -m anvil.pool install
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import hashlib
 import json
 import random
@@ -32,6 +31,7 @@ REPO = Path(__file__).parents[2]
 sys.path.insert(0, str(REPO))
 
 from anvil.pool import FORGE_DIR  # noqa: E402
+from anvil.utils.paths import stamp_name  # noqa: E402
 
 FORGE_GUI_DIR = FORGE_DIR / "forge-gui"
 
@@ -68,7 +68,7 @@ def main() -> None:
     p.add_argument(
         "--out",
         type=Path,
-        default=REPO / f"data/census/run-{_dt.date.today().strftime('%Y%m%d')}-dcpool",
+        default=REPO / f"data/runs/{stamp_name('census-dcpool')}",
     )
     a = p.parse_args()
     a.out = a.out.resolve()  # lanes run with cwd=FORGE_GUI_DIR; relative paths are the known trap

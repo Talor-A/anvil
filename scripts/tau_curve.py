@@ -63,7 +63,7 @@ def main() -> None:
         try:
             for seat in (0, 1):
                 purpose = f"taucurve-t{tag}-s{seat}"
-                before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+                before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
                 cmd = [
                     sys.executable,
                     "-m",
@@ -91,7 +91,7 @@ def main() -> None:
                 if a.reask:
                     cmd.append("--reask")
                 _run(cmd)
-                new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+                new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
                 if len(new) != 1:
                     raise RuntimeError(f"expected one new run dir, got {new}")
                 arm_dirs.append(new.pop())

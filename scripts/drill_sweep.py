@@ -103,7 +103,7 @@ def _watchdog(out: Path, tags: list[str], stall_min: int, state: dict) -> None:
         newest = state["phase_start"]
         for tag in tags:
             for lf in glob.glob(
-                str(gs.RUNS_DIR / f"drill{tag}-*" / "workers" / "*" / "labels.jsonl")
+                str(gs.RUNS_DIR / f"*-drill{tag}" / "workers" / "*" / "labels.jsonl")
             ):
                 newest = max(newest, os.path.getmtime(lf))
         stalled = time.time() - newest > stall_min * 60

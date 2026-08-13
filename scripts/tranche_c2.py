@@ -162,7 +162,7 @@ def _finish(name: str) -> None:
 
 def _launch_arm(seat: int, games: int, workers: int) -> Path:
     purpose = f"c2t3-s{seat}"
-    before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+    before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
     _run(
         [
             sys.executable,
@@ -191,7 +191,7 @@ def _launch_arm(seat: int, games: int, workers: int) -> Path:
             str(SEED_BASE),
         ]
     )
-    new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+    new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
     if len(new) != 1:
         raise RuntimeError(f"expected one new run dir for {purpose}: {new}")
     return Path(new.pop())

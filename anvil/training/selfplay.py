@@ -36,6 +36,7 @@ from anvil.trackio_logger import alert, child_env, finish, init_run, log
 from anvil.training.notify import notify as _shared_notify
 from anvil.training.notify import watch_register as _watch_register
 from anvil.training.notify import watch_unregister as _watch_unregister
+from anvil.utils.paths import make_stamp_dir
 
 RUNS_DIR = Path("data/runs")
 TRAJ_DIR = Path("data/trajectories")
@@ -197,7 +198,7 @@ def _write_pairs_file(path: Path, pair: tuple[str, str], n: int) -> None:
 def _launch_games(
     purpose: str, games: int, start_index: int, a, bridge_seats: "int | None" = None
 ) -> Path:
-    before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+    before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
     cmd = [
         sys.executable,
         "-m",
@@ -235,7 +236,7 @@ def _launch_games(
     if getattr(a, "reask", False):
         cmd.append("--reask")
     _run(cmd)
-    new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+    new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
     if len(new) != 1:
         raise RuntimeError(f"expected one new run dir for {purpose}, got {new}")
     return Path(new.pop())
@@ -301,7 +302,7 @@ def _drill_phase(args, state: dict, k: int, drill_dir: Path) -> list[str]:
             tag,
         ]
     )
-    before = set(glob.glob(str(RUNS_DIR / f"drill{tag}-*")))
+    before = set(glob.glob(str(RUNS_DIR / f"*-drill{tag}")))
     _run(
         [
             sys.executable,
@@ -320,7 +321,7 @@ def _drill_phase(args, state: dict, k: int, drill_dir: Path) -> list[str]:
             state["ckpt"],
         ]
     )
-    new_dirs = sorted(set(glob.glob(str(RUNS_DIR / f"drill{tag}-*"))) - before)
+    new_dirs = sorted(set(glob.glob(str(RUNS_DIR / f"*-drill{tag}"))) - before)
     if not new_dirs:
         raise RuntimeError(f"drill phase produced no run dirs (tag {tag})")
     stores = []
@@ -803,7 +804,14 @@ def main() -> None:
     # reclaims allocator fragmentation for this process and all subprocesses
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-    out = Path("data/training") / args.name
+    training_root = Path("data/training")
+    stable_link = training_root / args.name
+    if stable_link.is_symlink() or stable_link.exists():
+        out = stable_link.resolve()
+        print(f"[selfplay] resuming via {stable_link} -> {out}")
+    else:
+        out = make_stamp_dir(training_root, args.name)
+        stable_link.symlink_to(out.name, target_is_directory=True)
     out.mkdir(parents=True, exist_ok=True)
 
     state_path = out / "loop_state.json"
@@ -866,7 +874,7 @@ def main() -> None:
         run_dirs: list = []
         for bp, _, _, _ in batches:
             found = None
-            for cand in sorted(glob.glob(str(RUNS_DIR / f"{bp}-*"))):
+            for cand in sorted(glob.glob(str(RUNS_DIR / f"*-{bp}"))):
                 if (TRAJ_DIR / Path(cand).name / "manifest.json").exists():
                     found = Path(cand)
                     print(f"[selfplay] iteration {k}: reusing {cand} (store present)")
@@ -1151,7 +1159,7 @@ def main() -> None:
             try:
                 for seat in (0, 1):
                     ap_purpose = f"{args.name}-arm-i{k:03d}-s{seat}"
-                    before = set(glob.glob(str(RUNS_DIR / f"{ap_purpose}-*")))
+                    before = set(glob.glob(str(RUNS_DIR / f"*-{ap_purpose}")))
                     arm_cmd = [
                         sys.executable,
                         "-m",
@@ -1183,7 +1191,7 @@ def main() -> None:
                     if args.reask:
                         arm_cmd.append("--reask")
                     _run(arm_cmd)
-                    new = set(glob.glob(str(RUNS_DIR / f"{ap_purpose}-*"))) - before
+                    new = set(glob.glob(str(RUNS_DIR / f"*-{ap_purpose}"))) - before
                     arm_dirs.append(new.pop())
             finally:
                 _stop_server(server)

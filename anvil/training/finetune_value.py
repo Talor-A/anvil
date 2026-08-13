@@ -31,7 +31,6 @@ its policy heads are off-distribution garbage — never serve from it.
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import json
 import math
 import os
@@ -46,6 +45,7 @@ from anvil.torch.utils import get_torch_device
 from anvil.trackio_logger import finish, init_run, log
 from anvil.training.dataset import PriorityWindows, collate, default_methods
 from anvil.training.train import build_net
+from anvil.utils.paths import stamp_name
 
 
 def _auc(scores: np.ndarray, labels: np.ndarray) -> float:
@@ -152,7 +152,7 @@ def main() -> None:
     ck = torch.load(a.ckpt, map_location="cpu", weights_only=False)
     cfg = ck["config"]
     store = a.store or cfg["store"]
-    out_dir = Path(a.out or f"data/training/valuefix-{_dt.datetime.now():%Y%m%d-%H%M%S}")
+    out_dir = Path(a.out or f"data/training/{stamp_name('valuefix')}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     init_run(

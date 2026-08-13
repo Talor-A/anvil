@@ -178,13 +178,13 @@ def test_report_aggregates_and_supersedes(tmp_path, src_arm):
 
     runs = gs.RUNS_DIR
     # Run 1 (map sweep): g5 all-crash, g7 labeled; g9 replay-missed.
-    r1 = runs / f"drill-{store}-20260729-080000" / "workers" / "inv-0000"
+    r1 = runs / f"20260729-080000-drill-{store}" / "workers" / "inv-0000"
     r1.mkdir(parents=True)
     (r1 / "labels.jsonl").write_text(
         json.dumps(_label(5, 9, [0, 0], crash=8)) + "\n" + json.dumps(_label(7, 13, [2, 6])) + "\n"
     )
     # Run 2 (post-fix re-drill): g5 now labels — must supersede run 1.
-    r2 = runs / f"drill-{store}-20260729-090000" / "workers" / "inv-0000"
+    r2 = runs / f"20260729-090000-drill-{store}" / "workers" / "inv-0000"
     r2.mkdir(parents=True)
     (r2 / "labels.jsonl").write_text(json.dumps(_label(5, 9, [3, 5])) + "\n")
 
@@ -224,10 +224,10 @@ def test_report_tag_isolates_sweep_arms(tmp_path, src_arm):
 
     runs = gs.RUNS_DIR
     # Decoy: an untagged (map) run for the same store, LATER timestamp.
-    decoy = runs / f"drill-{store}-20260729-090000" / "workers" / "inv-0000"
+    decoy = runs / f"20260729-090000-drill-{store}" / "workers" / "inv-0000"
     decoy.mkdir(parents=True)
     (decoy / "labels.jsonl").write_text(json.dumps(_label(5, 9, [0, 0])) + "\n")
-    ours = runs / f"drillo2-{store}-20260729-080000" / "workers" / "inv-0000"
+    ours = runs / f"20260729-080000-drillo2-{store}" / "workers" / "inv-0000"
     ours.mkdir(parents=True)
     (ours / "labels.jsonl").write_text(json.dumps(_label(5, 7, [2, 6])) + "\n")
 

@@ -30,6 +30,8 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from anvil.utils.paths import parse_stamp
+
 RUNS_DIR = Path("data/runs")
 
 # Fork-turn anchor: the value-crash window itself, the last turn the
@@ -233,7 +235,7 @@ def generate(a: argparse.Namespace) -> None:
                 )
             finally:
                 _stop_server(server)
-            run_dirs = sorted(glob.glob(str(RUNS_DIR / f"{prefix}-{arm['store']}-*")))
+            run_dirs = sorted(glob.glob(str(RUNS_DIR / f"*-{prefix}-{arm['store']}")))
             if not run_dirs or not mu_path.exists():
                 sys.exit(f"FATAL: no run dir or mu file for arm {arm['store']}")
             shutil.copy(mu_path, Path(run_dirs[-1]) / "mu.jsonl")
@@ -286,7 +288,7 @@ def report(a: argparse.Namespace) -> None:
     joined, missed = [], []
     for arm in manifest["arms"]:
         seat = int(str(arm["bridge_seats"]))
-        run_glob = str(RUNS_DIR / f"{prefix}-{arm['store']}-*")
+        run_glob = str(RUNS_DIR / f"*-{prefix}-{arm['store']}")
         run_dirs = sorted(glob.glob(run_glob))
         if not run_dirs:
             sys.exit(f"FATAL: no drill run dirs match {run_glob}")
@@ -553,8 +555,9 @@ def eval_ckpt(a: argparse.Namespace) -> None:
     rows = []
     for arm in plan_manifest["arms"]:
         seat = int(str(arm["bridge_seats"]))
-        for run_dir in sorted(glob.glob(str(RUNS_DIR / f"drilleval-{arm['store']}-*"))):
-            if run_dir.rsplit("-", 2)[-2] + "-" + run_dir.rsplit("-", 1)[-1] < t0:
+        for run_dir in sorted(glob.glob(str(RUNS_DIR / f"*-drilleval-{arm['store']}"))):
+            stamp = parse_stamp(Path(run_dir).name)
+            if stamp is None or stamp < t0:
                 continue
             for lf in glob.glob(f"{run_dir}/workers/*/labels.jsonl"):
                 for line in open(lf):

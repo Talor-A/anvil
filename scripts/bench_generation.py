@@ -61,7 +61,7 @@ def arm(
     calibrated: bool = False,
 ) -> dict:
     purpose = f"genbench-w{workers}"
-    before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+    before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
     cmd = [
         sys.executable,
         "-m",
@@ -94,7 +94,7 @@ def arm(
     if p.returncode != 0:
         return {"workers": workers, "ok": False, "error": (p.stderr or p.stdout)[-1200:]}
 
-    new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+    new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
     rd = Path(new.pop()) if len(new) == 1 else None
     decisive = crashed = 0
     if rd is not None and (rd / "games.jsonl").exists():

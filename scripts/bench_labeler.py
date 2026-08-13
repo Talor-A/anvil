@@ -47,7 +47,7 @@ ADR_0015 = {
 
 
 def run_arm(a, purpose: str, games: int, workers: int, points: int, k: int) -> dict:
-    before = set(glob.glob(str(RUNS_DIR / f"{purpose}-*")))
+    before = set(glob.glob(str(RUNS_DIR / f"*-{purpose}")))
     chunk = batch_chunk(games, workers, a.chunk)
     cmd = [
         sys.executable,
@@ -82,7 +82,7 @@ def run_arm(a, purpose: str, games: int, workers: int, points: int, k: int) -> d
     if p.returncode != 0:
         return {"ok": False, "elapsed_s": round(elapsed, 1)}
 
-    new = set(glob.glob(str(RUNS_DIR / f"{purpose}-*"))) - before
+    new = set(glob.glob(str(RUNS_DIR / f"*-{purpose}"))) - before
     rd = Path(new.pop()) if len(new) == 1 else None
     # dedupe by (game, fork point): crash re-launches replay partial games
     # and re-append their label rows (85/689 in the first bench)
