@@ -149,7 +149,7 @@ def main():
             )
             if seat is None or "pg" not in fk:
                 continue
-            w = 1.0 if st.winner_seat(g) == seat else 0.0
+            w = int(st.winner_seat(g) == seat)
             cls, hta = classify_completion(traj.decisions, mu, seat)
             key = (it, arm, fk["pg"], fk["fp"])
             pt = points[key]

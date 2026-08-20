@@ -314,7 +314,7 @@ class ValueEvaluator:
             if r < 0 and n is not None:
                 self.emb_misses[n] += 1
             emb.append(r)
-        task = TASKS.get(TASK_OF_METHOD.get(dec.get("m"), "priority"), 0)
+        task = TASKS.get(TASK_OF_METHOD.get(str(dec.get("m", "priority")), "priority"), 0)
         z = lambda v: torch.tensor(v, dtype=torch.int64)  # noqa: E731
         return {
             "entities": torch.from_numpy(out["entities"]),

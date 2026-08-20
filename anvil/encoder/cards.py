@@ -117,8 +117,8 @@ class CardEncoder(nn.Module):
         """rows (..., ) int64, -1 = no card -> (..., d_card)."""
         safe = rows.clamp(min=0)
         known = (rows >= 0).unsqueeze(-1)
-        text = torch.where(known, self.text[safe], self.null_text)
-        feats = torch.where(known, self.feats[safe], self.null_feats)
+        text = torch.where(known, self.text[safe], self.null_text)  # type: ignore[operator]
+        feats = torch.where(known, self.feats[safe], self.null_feats)  # type: ignore[operator]
         ids = self.id_emb(
             torch.where(rows >= 0, rows, torch.full_like(rows, self.id_emb.num_embeddings - 1))
         )

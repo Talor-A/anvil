@@ -244,7 +244,7 @@ def history_tokens(
 def assemble(
     dec: dict[str, Any],
     header: dict[str, Any],
-    perspective: int | None = None,
+    perspective: int = -1,
     vocab: Vocab | None = None,
     history: list[dict[str, Any]] | None = None,
     full_vis: bool = False,
@@ -260,7 +260,7 @@ def assemble(
     obs = dec.get("obs")
     if obs is None:
         raise ValueError(f"decision s={dec.get('s')} has no observation (obs:null error record?)")
-    if perspective is None:
+    if perspective < 0:
         perspective = dec["p"]
     if perspective < 0:
         raise ValueError("no perspective: decision record has no deciding player")

@@ -160,7 +160,8 @@ def validate_game(traj: GameTrajectory, report: ValidationReport) -> None:
 
     for dec in traj.decisions:
         if dec["m"] == PLAY_METHOD:
-            queue = pending_play.get(dec.get("p"))
+            p_seat = int(dec.get("p", 0))
+            queue = pending_play.get(p_seat)
             if queue:  # a playChosen with no pending label is another play path
                 seq, plan = queue.pop(0)
                 played = (dec.get("args") or {}).get("sa") or ""
@@ -208,10 +209,10 @@ def validate_game(traj: GameTrajectory, report: ValidationReport) -> None:
                         report.error(g, seq, f"target e={ref['e']} not in observation")
                     if "pi" in ref and not (0 <= ref["pi"] < n_players):
                         report.error(g, seq, f"target pi={ref['pi']} out of range")
-            if structured and plan.host is not None:
+            if opts is not None and structured and plan.host is not None:
                 if plan.host not in {o.get("e") for o in opts}:
                     report.error(g, seq, f"chosen e={plan.host} not among {len(opts)} options")
-            pending_play.setdefault(dec.get("p"), []).append((seq, plan))
+            pending_play.setdefault(int(dec.get("p", 0)), []).append((seq, plan))
 
     for queue in pending_play.values():
         # end-of-game abandonment (hard cap, concession) can strand a tail

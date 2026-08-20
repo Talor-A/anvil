@@ -23,6 +23,7 @@ import argparse
 import glob
 import json
 from pathlib import Path
+from typing import Any
 
 
 def derived_counts(store_path: str, stem: str) -> dict:
@@ -33,7 +34,7 @@ def derived_counts(store_path: str, stem: str) -> dict:
 
     store = open_store(store_path)
     feat = Featurizer(stem, default_methods())
-    out = {"priority": 0, "attack": 0, "block": 0, "games": 0, "skipped": 0}
+    out: dict[str, Any] = {"priority": 0, "attack": 0, "block": 0, "games": 0, "skipped": 0}
     for g in store.game_indices():
         mu = store.mu_for_game(g)
         if not mu:
@@ -43,7 +44,9 @@ def derived_counts(store_path: str, stem: str) -> dict:
             traj = store.game(g)
         except Exception as e:  # undecodable frame: census still counted it
             out["skipped"] += 1
-            out.setdefault("undecodable", []).append((g, str(e)[:60]))
+            if "undecodable" not in out:
+                out["undecodable"] = []
+            out["undecodable"].append((g, str(e)[:60]))
             continue
         out["games"] += 1
         prior = []

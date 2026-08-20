@@ -188,7 +188,7 @@ def gather(store_dir: Path):
                             name = id_name[host]
                             cast_counts[name] += 1
                             owner = id_ctrl.get(host)
-                            deck = deck_of_seat.get(owner)
+                            deck = deck_of_seat.get(int(owner)) if owner is not None else None
                             if deck:
                                 cast_by_deck[deck][name] += 1
         reps = Counter(priority_turn_p)

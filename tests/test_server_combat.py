@@ -31,7 +31,7 @@ def test_attackmap_expansion_and_targets():
         "seats": [1, 0],  # perspective p=1: position 1 = registered player 0
         "blk_atk_rows": [],
     }
-    am = ModelBackend._attackmap(_stub(), out, aux)
+    am = ModelBackend._attackmap(_stub(), out, aux)  # type: ignore[arg-type]
     got = [
         (
             a.attacker.entity,
@@ -58,6 +58,6 @@ def test_blockmap_none_and_group_expansion():
         "seats": [0, 1],
         "blk_atk_rows": [9, 11],
     }
-    bm = ModelBackend._blockmap(_stub(), out, aux)
+    bm = ModelBackend._blockmap(_stub(), out, aux)  # type: ignore[arg-type]
     got = [(a.blocker.entity, a.attacker.entity) for a in bm.assignments]
     assert got == [(5, 30)]

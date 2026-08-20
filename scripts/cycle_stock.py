@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import io
 import sys
 import time
 from pathlib import Path
@@ -43,7 +44,9 @@ def _run(cmd: list[str]) -> None:
 
 
 def main() -> None:
-    sys.stdout.reconfigure(line_buffering=True)
+    import io
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--games-per-arm", type=int, default=800)
     ap.add_argument("--workers", type=int, default=16)

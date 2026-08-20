@@ -610,7 +610,9 @@ def eval_ckpt(a: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    sys.stdout.reconfigure(line_buffering=True)
+    import io
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
 

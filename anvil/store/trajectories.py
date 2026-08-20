@@ -363,10 +363,10 @@ def ingest(
     run_dir = Path(run_dir)
     run_manifest = json.loads((run_dir / "run.json").read_text())
     run_id = run_manifest["run_id"] + ("-forks" if forks else "")
-    dest = Path(dest) if dest else TRAJECTORIES_DIR / run_id
-    if (dest / "manifest.json").exists():
-        sys.exit(f"store already exists at {dest}; ingest is one-shot (delete it to re-ingest)")
-    dest.mkdir(parents=True, exist_ok=True)
+    dest_path = Path(dest) if dest else TRAJECTORIES_DIR / run_id
+    if (dest_path / "manifest.json").exists():
+        sys.exit(f"store already exists at {dest_path}; ingest is one-shot (delete it to re-ingest)")
+    dest_path.mkdir(parents=True, exist_ok=True)
 
     src_name = "obs-forks.zst" if forks else "obs.zst"
     index_entries: list[dict] = []
@@ -400,7 +400,7 @@ def ingest(
             total_rlen += e["rlen"]
             kept += 1
         if kept:
-            shutil.copy2(src, dest / fname)
+            shutil.copy2(src, dest_path / fname)
             n_files += 1
 
     if not index_entries:
@@ -411,11 +411,12 @@ def ingest(
         )
 
     index_entries.sort(key=lambda e: e["g"])
-    with open(dest / "index.jsonl", "w") as f:
+    with open(dest_path / "index.jsonl", "w") as f:
         for e in index_entries:
             f.write(json.dumps(e) + "\n")
 
     fork_agg: dict[tuple[int, int], dict] = {}
+    quarantined: list[int] = []
     if forks:
         # Synthesize games.jsonl from the fork frames' own end records —
         # the harness progress logs carry MAINLINE outcomes, which under
@@ -427,9 +428,8 @@ def ingest(
         for e in index_entries:
             by_file.setdefault(e["file"], []).append(e)
         rows: dict[int, dict] = {}
-        quarantined: list[int] = []
         for fname, entries in sorted(by_file.items()):
-            data = (dest / fname).read_bytes()
+            data = (dest_path / fname).read_bytes()
             for e in entries:
                 try:
                     if e["clen"] == 0 or e["rlen"] > (1 << 30):
@@ -476,14 +476,14 @@ def ingest(
                     "turns": end["turns"],
                     "fork": fk,
                 }
-        with open(dest / "games.jsonl", "w") as f:
+        with open(dest_path / "games.jsonl", "w") as f:
             for i in sorted(rows):
                 f.write(json.dumps(rows[i]) + "\n")
         print(f"[ingest] {len(rows)} fork-completion outcome rows synthesized from end records")
         if quarantined:
             bad = set(quarantined)
             index_entries = [e for e in index_entries if e["g"] not in bad]
-            with open(dest / "index.jsonl", "w") as f:
+            with open(dest_path / "index.jsonl", "w") as f:
                 for e in index_entries:
                     f.write(json.dumps(e) + "\n")
             print(
@@ -501,7 +501,7 @@ def ingest(
                     outcomes[r["i"]] = r
                 except (json.JSONDecodeError, KeyError):
                     continue
-        with open(dest / "games.jsonl", "w") as f:
+        with open(dest_path / "games.jsonl", "w") as f:
             for i in sorted(outcomes):
                 f.write(json.dumps(outcomes[i]) + "\n")
 
@@ -516,7 +516,7 @@ def ingest(
             except (json.JSONDecodeError, KeyError):
                 continue
     if label_rows:
-        with open(dest / "labels.jsonl", "w") as f:
+        with open(dest_path / "labels.jsonl", "w") as f:
             for key in sorted(label_rows):
                 f.write(json.dumps(label_rows[key]) + "\n")
         print(f"[ingest] {len(label_rows)} rollout-label records -> labels.jsonl")
@@ -593,7 +593,7 @@ def ingest(
                 file=sys.stderr,
             )
             mu_rows = {k: v for k, v in mu_rows.items() if k[0] not in conflicted}
-        with open(dest / "mu.jsonl", "w") as f:
+        with open(dest_path / "mu.jsonl", "w") as f:
             if meta is not None:
                 f.write(json.dumps(meta) + "\n")
             for key in sorted(mu_rows):
@@ -652,10 +652,10 @@ def ingest(
             "labels_check": labels_check,
             "quarantined": quarantined,
         }
-    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (dest_path / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     if verify:
-        store = TrajectoryStore(dest)
+        store = TrajectoryStore(dest_path)
         n_dec = 0
         for traj in store.games():
             if traj.end is None:
@@ -667,11 +667,11 @@ def ingest(
 
     ratio = total_rlen / total_clen if total_clen else 0
     print(
-        f"[ingest] {run_id}: {len(index_entries)} games -> {dest}\n"
+        f"[ingest] {run_id}: {len(index_entries)} games -> {dest_path}\n"
         f"[ingest] {total_rlen / 1e6:.1f} MB raw -> {total_clen / 1e6:.1f} MB "
         f"({ratio:.1f}x, {total_clen / max(len(index_entries), 1) / 1e3:.0f} KB/game)"
     )
-    return dest
+    return dest_path
 
 
 def status(root: Path | str) -> None:

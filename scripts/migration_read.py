@@ -32,11 +32,13 @@ BIG_DROP = 0.30
 
 
 def load(d: str):
-    d = Path(d)
-    summary = json.loads((d / "summary.json").read_text())
-    cur = [json.loads(x) for x in (d / "curation.jsonl").read_text().splitlines()]
+    p = Path(d)
+    summary = json.loads(p.read_bytes())
+    # pyright lags on Path / __truediv__ for string literals; cast to str
+    dp = str(p)
+    cur = [json.loads(x) for x in open(f"{dp}/curation.jsonl")]
     traces = {}
-    for x in (d / "traces.jsonl").read_text().splitlines():
+    for x in open(f"{dp}/traces.jsonl"):
         r = json.loads(x)
         traces[(r["model_seat"], r["seed"])] = r
     return summary, cur, traces

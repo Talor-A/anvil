@@ -7,6 +7,7 @@ is pinned by the D2 smoke run; these tests pin the Python contract.
 """
 
 import json
+from typing import Any
 
 import zstandard
 
@@ -37,8 +38,8 @@ def _obs(ents=(70, 81, 90, 55), stack=()):
     return obs
 
 
-def _dec(s, method, p=0, obs=None, opts=None, args=None, ret="__absent__"):
-    d = {"k": "dec", "s": s, "t": 3, "ph": "MAIN1", "p": p, "m": method, "d": 10}
+def _dec(s, method, p=0, obs=None, opts=None, args=None, ret: Any = "__absent__"):
+    d: dict[str, Any] = {"k": "dec", "s": s, "t": 3, "ph": "MAIN1", "p": p, "m": method, "d": 10}
     if obs is not None:
         d["obs"] = obs
     if opts is not None:
@@ -71,6 +72,7 @@ OPTS = [
 def test_parse_ret_shapes():
     assert parse_ret(None) is None
     plans = parse_ret([KICKED])
+    assert plans is not None
     assert len(plans) == 1
     p = plans[0]
     assert p.host == 90 and p.kind == "spell"

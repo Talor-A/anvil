@@ -56,7 +56,7 @@ def main() -> None:
 
     skips = [r for r in rows if r.get("seat_skip")]
     pts = [r for r in rows if not r.get("seat_skip")]
-    n_hor = sorted({r.get("n") for r in pts})
+    n_hor = sorted({int(r.get("n", 0)) for r in pts if r.get("n") is not None})
     print(
         f"fork points: {len(rows)} total, {len(skips)} seat_skip, "
         f"{len(pts)} probed (horizon n={n_hor})"

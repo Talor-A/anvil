@@ -166,8 +166,9 @@ def _summarize(out: Path, arms: list[dict]) -> dict:
 
 def main() -> None:
     import sys
-
-    sys.stdout.reconfigure(line_buffering=True)
+    import io
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
         "--map", type=Path, required=True, help="mapped manifest dir (plan+generate+report done)"

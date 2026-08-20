@@ -86,7 +86,7 @@ class DecisionBridge:
         timeout=None,
         metadata=None,
     ):
-        return grpc.experimental.stream_stream(
+        return grpc.experimental.stream_stream(  # type: ignore[attr-defined]
             request_iterator,
             target,
             "/anvil.bridge.v0.DecisionBridge/Session",

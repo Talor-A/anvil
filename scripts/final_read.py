@@ -27,7 +27,9 @@ def main() -> None:
     # Detached stdout to a redirected log is BLOCK-buffered, so a log-tail
     # watcher sees nothing until exit (run-8 held 36h of narration in memory).
     # The driver fixed its own line buffering; reads never got it.
-    sys.stdout.reconfigure(line_buffering=True)
+    import io
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
 
     ap = argparse.ArgumentParser(description="2,000-game corrected read")
     ap.add_argument("--ckpt", required=True)

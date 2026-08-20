@@ -200,9 +200,10 @@ class Run:
         if getattr(m, "force_branch", None):
             # M7 D2: act/hold paired branches at drilled fork points
             cmd += ["-forcebranch"]
-        if getattr(m, "force_seq", None):
+        fs = getattr(m, "force_seq", None)
+        if fs:
             # M7 D2 sequence probe: natural/hold-N/act-N paired arms
-            cmd += ["-forceseq", str(m.force_seq)]
+            cmd += ["-forceseq", str(fs)]
         (wdir / "cmd.txt").write_text(" ".join(cmd) + "\n")
         out = open(wdir / "out.log", "a")
         return subprocess.Popen(cmd, cwd=FORGE_GUI_DIR, stdout=out, stderr=subprocess.STDOUT)

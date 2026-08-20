@@ -275,7 +275,7 @@ class ModelBackend:
             self.counts["reask"] += 1
         ex, aux = self.feat.example(dec, header, task)
         delta = self.pass_delta if task == "priority" else 0.0
-        if req.forbid_decline and task == "priority":
+        if getattr(req, "forbid_decline", False) and task == "priority":
             # M7 forced-branch act ask: mask the pass logit so the sampled/
             # argmax pick must be a cast. -1e9 dominates any real logit in
             # both modes; the calibration delta is irrelevant under the mask.
@@ -649,7 +649,7 @@ def main() -> None:
         )
     )
     servicer = DecisionServicer(
-        args.mode, tags.split(","), backend=backend, drill_backend=drill_backend
+        args.mode, list(tags.split(",")), backend=backend, drill_backend=drill_backend
     )
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=32))
     pb_grpc.add_DecisionBridgeServicer_to_server(servicer, server)
