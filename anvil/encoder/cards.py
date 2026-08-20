@@ -24,7 +24,7 @@ This channel gives the transformer a rich semantic signal — abilities,
 types, keywords, flavor — all captured as a dense vector.
 
 **Structured features** (`self.feats`, frozen `(n, d_feat)` buffer):
-Pool stats computed offline — CMC, pip counts, type flags, power/toughness,
+Card stats computed offline — CMC, pip counts, type flags, power/toughness,
 loyalty, number of faces. Same row order as the text table, so they align
 one-to-one. Text captures *what the card does in words*; features capture
 *what the card does in numbers* — the mechanical quantities the rules engine

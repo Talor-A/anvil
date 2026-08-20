@@ -123,11 +123,12 @@ def test_critic_value_forward_on_fv(feat_and_game):
     _, _, _, trajs = feat_and_game
     exs_fv = trajs[0][4][:8]
     ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
+    if "action_text_version" not in ckpt["config"]:
+        pytest.skip("legacy fixed-action-vocabulary checkpoint")
     net = build_net(
         str(EMBED).removesuffix(".safetensors"),
         ckpt["config"]["pool_manifest"],
         len(default_methods()),
-        n_sa=ckpt["config"].get("sa_vocab_size", 0),
     )
     net.load_compat(ckpt["model"])
     net.eval()

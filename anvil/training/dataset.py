@@ -32,8 +32,7 @@ Example shape (priority shown; others subset these fields):
   players    (P, Q) float32
   history    (K, 3) int64     (method-id, actor-is-self, host-row or -1)
   cand_rows  (C,)   int64     candidate source rows; index 0 is always PASS (-1)
-  cand_sa    (C,)   int64     SA-string vocab id per candidate (-1 = PASS/pad)
-  cand_kind  (C,)   int64     KINDS id per candidate (-1 = PASS/pad)
+  cand_text  (C, L) int64     open-vocabulary action-text features (zero = PASS/pad)
   label      ()     int64     index into cand_rows the expert chose;
                               -1 = masked from policy loss
   label_row  ()     int64     expert's chosen HOST row (-1 = pass)
@@ -134,6 +133,7 @@ import numpy as np
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
 
+from anvil.encoder.actiontext import action_text_tokens
 from anvil.encoder.transform import HISTORY_K, assemble, history_tokens
 from anvil.schemas.tensors import Batch, Example
 from anvil.store.trajectories import open_store
@@ -178,41 +178,37 @@ COMBAT_COUNT_MAX = 12  # count-head classes k=1..12; per-group k beyond 12 is
 # to "all" only via the executor's group size)
 _HOST_ID = re.compile(r"\((\d+)\)$")  # "Spider-Man 2099 (100)" -> entity id 100
 
-# SA candidate descriptors (M2 D2): option "kind" vocabulary + string
-# normalization. Option strings render decision-time X ("... (X=0)") — strip
-# it so the vocab key is state-independent; measured a no-op on corpus vocab
-# size but insurance against serve-time X-bearing renders.
-KINDS = {"land": 0, "spell": 1, "ability": 2, "other": 3}
+# Action strings render decision-time X ("... (X=0)") — strip it so the
+# representation is state-independent before embedding the real Forge text.
 _X_SUFFIX = re.compile(r" \(X=\d+\)")
+_ROUTE_ID = re.compile(r"(\bby\s+[^()]*?) \(\d+\)")
 
 
 def norm_sa(sa: str) -> str:
-    return _X_SUFFIX.sub("", sa)
+    # Forge's render is capped at 120 characters and frequently leaves
+    # incidental trailing spaces; trim only whitespace and decision-time X.
+    # Source-route suffixes remain because they can distinguish legal options.
+    return _X_SUFFIX.sub("", sa.strip())
+
+
+def canonical_action_text(sa: str) -> str:
+    """Normalize incidental render differences without inventing text.
+
+    Forge appends ephemeral engine object IDs to permission routes, e.g.
+    ``by Light Up the Stage (44)``. Keep the meaningful source name but mask
+    the run-local number; it has no stable semantics across games.
+    """
+    return _ROUTE_ID.sub(r"\1 (#)", norm_sa(sa))
+
+
+def action_tokens(sa: str) -> list[int]:
+    """Shared train/serve features for one real Forge action string."""
+    return action_text_tokens(canonical_action_text(sa))
 
 
 def _prefix_eq(a: str, b: str) -> bool:
     n = min(len(a), len(b))
     return n > 0 and a[:n] == b[:n]
-
-
-class SaVocab:
-    """Pinned SA-string vocab (normalized); unseen strings -> one OOV id
-    (len(vocab)) — the embedding table is sized len+1. OOV mentions measured
-    at 0.17-0.24% on held-out splits; the host entity + kind still carry
-    such candidates."""
-
-    def __init__(self, strings: list[str]):
-        self.by_str = {s: i for i, s in enumerate(strings)}
-
-    def id(self, s: str) -> int:
-        return self.by_str.get(s, len(self.by_str))
-
-    def __len__(self) -> int:
-        return len(self.by_str)
-
-
-def default_sa_vocab() -> list[str]:
-    return json.loads((Path(__file__).parent / "sa_vocab_v1.json").read_text())["sa_strings"]
 
 
 class MethodVocab:
@@ -429,7 +425,6 @@ class PriorityWindows(IterableDataset):
         games_per_pair: int = 5,
         max_games: int | None = None,
         tasks: set[str] | None = None,
-        sa_vocab: list[str] | None = None,
         full_vis: bool = False,
     ):
         super().__init__()
@@ -439,7 +434,6 @@ class PriorityWindows(IterableDataset):
         self.store_dir = store_dir  # raw spec: dir, comma-list, or list (open_store parses)
         self.embed = EmbeddingCache(Path(embedding_stem))
         self.methods = MethodVocab(methods or default_methods())
-        self.sa_vocab = SaVocab(sa_vocab or default_sa_vocab())
         self.shuffle_games = shuffle_games
         self.seed = seed
         self.history_k = history_k
@@ -495,8 +489,7 @@ class PriorityWindows(IterableDataset):
 
             # ---- shared pad values; each task fills its own labels ----
             cand_rows = [-1]
-            cand_sa = [-1]
-            cand_kind = [-1]
+            cand_text = [action_text_tokens("")]
             label = 0
             label_row = -1
             tgt_kind = np.full(T_MAX + 1, -1, dtype=np.int64)
@@ -520,21 +513,20 @@ class PriorityWindows(IterableDataset):
             args = dec.get("args") or {}
 
             if task == "priority":
-                # candidates: PASS first, then (host row, SA) pairs in option
-                # order; identical (row, normalized-sa) pairs collapse
+                # candidates: PASS first, then (host row, action text) in
+                # option order; identical normalized pairs collapse
                 opts = dec.get("opts") or []
                 key_of: dict[tuple[int, str], int] = {}
                 for o in opts:
                     r = row_of.get(o.get("e"))
                     if r is None:
                         continue
-                    key = (r, norm_sa(o.get("sa", "")))
+                    key = (r, canonical_action_text(o.get("sa", "")))
                     if key in key_of:
                         continue
                     key_of[key] = len(cand_rows)
                     cand_rows.append(r)
-                    cand_sa.append(self.sa_vocab.id(key[1]))
-                    cand_kind.append(KINDS.get(o.get("kind"), KINDS["other"]))
+                    cand_text.append(action_tokens(key[1]))
                 if ret is not None:
                     plan = ret[0] if isinstance(ret, list) and ret else {}
                     host = plan.get("e")
@@ -551,10 +543,14 @@ class PriorityWindows(IterableDataset):
                     if oi is not None and 0 <= oi < len(opts):
                         o = opts[oi]
                         label = key_of.get(
-                            (row_of.get(o.get("e"), -1), norm_sa(o.get("sa", ""))), -1
+                            (
+                                row_of.get(o.get("e"), -1),
+                                canonical_action_text(o.get("sa", "")),
+                            ),
+                            -1,
                         )
                     if label < 0:
-                        psa = norm_sa(plan.get("sa", ""))
+                        psa = canonical_action_text(plan.get("sa", ""))
                         keys = [k for k in key_of if k[0] == r]
                         hit = [k for k in keys if k[1] == psa]
                         if not hit:
@@ -623,8 +619,7 @@ class PriorityWindows(IterableDataset):
                 "players": torch.from_numpy(out["players"]),
                 "history": torch.from_numpy(hist),
                 "cand_rows": torch.tensor(cand_rows, dtype=torch.int64),
-                "cand_sa": torch.tensor(cand_sa, dtype=torch.int64),
-                "cand_kind": torch.tensor(cand_kind, dtype=torch.int64),
+                "cand_text": torch.tensor(cand_text, dtype=torch.int64),
                 "label": torch.tensor(label, dtype=torch.int64),
                 "label_row": torch.tensor(label_row, dtype=torch.int64),
                 "tgt_kind": torch.from_numpy(tgt_kind),
@@ -684,8 +679,7 @@ def collate(batch: list[Example]) -> Batch:
         "ent_emb": torch.full((b, n), -1, dtype=torch.int64),
         "ent_mask": torch.zeros(b, n, dtype=torch.bool),
         "cand_rows": torch.full((b, c), -1, dtype=torch.int64),
-        "cand_sa": torch.full((b, c), -1, dtype=torch.int64),
-        "cand_kind": torch.full((b, c), -1, dtype=torch.int64),
+        "cand_text": torch.zeros(b, c, batch[0]["cand_text"].shape[1], dtype=torch.int64),
         "cand_mask": torch.zeros(b, c, dtype=torch.bool),
         "globals": torch.stack([x["globals"] for x in batch]),
         "players": torch.stack([x["players"] for x in batch]),
@@ -731,8 +725,7 @@ def collate(batch: list[Example]) -> Batch:
         out["ent_emb"][i, :ni] = x["ent_emb"]
         out["ent_mask"][i, :ni] = True
         out["cand_rows"][i, :ci] = x["cand_rows"]
-        out["cand_sa"][i, :ci] = x["cand_sa"]
-        out["cand_kind"][i, :ci] = x["cand_kind"]
+        out["cand_text"][i, :ci] = x["cand_text"]
         out["cand_mask"][i, :ci] = True
         ai, mi = x["cmb_rows"].shape[0], x["blk_atk_rows"].shape[0]
         if ai:

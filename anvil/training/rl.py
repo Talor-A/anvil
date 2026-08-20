@@ -821,11 +821,10 @@ def main() -> None:
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     cfg = ckpt["config"]
     methods = default_methods()
-    n_sa = cfg.get("sa_vocab_size", 0)
-    net = build_net(cfg["embed"], cfg["pool_manifest"], len(methods), n_sa=n_sa).to(dev)
+    net = build_net(cfg["embed"], cfg["pool_manifest"], len(methods)).to(dev)
     net.load_compat(ckpt["model"])
     net.train()
-    ref = build_net(cfg["embed"], cfg["pool_manifest"], len(methods), n_sa=n_sa).to(dev)
+    ref = build_net(cfg["embed"], cfg["pool_manifest"], len(methods)).to(dev)
     ref_ckpt = (
         torch.load(args.ref_ckpt, map_location="cpu", weights_only=False) if args.ref_ckpt else ckpt
     )
@@ -834,7 +833,7 @@ def main() -> None:
     critic = None
     if args.critic_ckpt:
         critic_ck = torch.load(args.critic_ckpt, map_location="cpu", weights_only=False)
-        critic = build_net(cfg["embed"], cfg["pool_manifest"], len(methods), n_sa=n_sa).to(dev)
+        critic = build_net(cfg["embed"], cfg["pool_manifest"], len(methods)).to(dev)
         critic.load_compat(critic_ck["model"])
         critic.eval()
         critic.requires_grad_(False)

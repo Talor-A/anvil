@@ -27,7 +27,7 @@ every other module imports these two TypedDicts.
 ### 3. Card encoder — `anvil/encoder/cards.py`
 
 Turns card names into dense vectors for the transformer. Three channels fused
-by a 2-layer MLP: frozen text embeddings, structured pool features (CMC,
+by a 2-layer MLP: frozen text embeddings, structured card features (CMC,
 power/toughness, etc.), and a learned ID lookup for memorization.
 Hidden-identity entities get learned null vectors (no information leak).
 
@@ -55,8 +55,8 @@ The most Magic-specific module. Reads stored trajectories and yields one
 `Example` per decision "window". Defines the task taxonomy:
 `priority`, `mull_keep`, `mull_tuck`, `trigger`, `binary`, `number`,
 `attack`, `block`. Handles candidate resolution from expert labels,
-SA-level ambiguity, combat label reconstruction from later-in-combat
-observations, and batch padding via `collate()`.
+open-vocabulary action-text features, combat label reconstruction from
+later-in-combat observations, and batch padding via `collate()`.
 
 ### 7. Trajectory store — `anvil/store/trajectories.py`
 

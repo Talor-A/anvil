@@ -85,9 +85,7 @@ def main() -> None:
     device = get_torch_device()
     ckpt = torch.load(a.ckpt, map_location=device, weights_only=False)
     cfg = ckpt["config"]
-    net = build_net(
-        cfg["embed"], cfg["pool_manifest"], len(default_methods()), n_sa=cfg.get("sa_vocab_size", 0)
-    ).to(device)
+    net = build_net(cfg["embed"], cfg["pool_manifest"], len(default_methods())).to(device)
     net.load_compat(ckpt["model"])
     net.eval()
 

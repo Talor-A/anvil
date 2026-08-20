@@ -54,12 +54,9 @@ def net_and_feat():
     methods = default_methods()
     stem = str(EMBED).removesuffix(".safetensors")
     ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
-    net = build_net(
-        stem,
-        ckpt["config"]["pool_manifest"],
-        len(methods),
-        n_sa=ckpt["config"].get("sa_vocab_size", 0),
-    )
+    if "action_text_version" not in ckpt["config"]:
+        pytest.skip("legacy fixed-action-vocabulary checkpoint")
+    net = build_net(stem, ckpt["config"]["pool_manifest"], len(methods))
     net.load_compat(ckpt["model"])
     net.eval()
     return net, Featurizer(stem, methods)

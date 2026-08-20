@@ -163,9 +163,7 @@ def main() -> None:
     )
 
     methods = default_methods()
-    net = build_net(
-        cfg["embed"], cfg["pool_manifest"], len(methods), n_sa=cfg.get("sa_vocab_size", 0)
-    ).to(device)
+    net = build_net(cfg["embed"], cfg["pool_manifest"], len(methods)).to(device)
     net.load_compat(ck["model"])
     for name, p in net.named_parameters():
         p.requires_grad = a.trainable == "all" or name.startswith("value_head")

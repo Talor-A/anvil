@@ -161,8 +161,7 @@ class TrainConfig(BaseModel):
     steps: int = 20000
     pass_weight: float = 0.1
     methods_version: int = 1
-    sa_vocab_version: int = 1
-    sa_vocab_size: int = 0
+    action_text_version: int
     transform_version: int
     embed_meta: dict[str, Any]
     params: int | None = None

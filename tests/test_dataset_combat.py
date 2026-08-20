@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from anvil.encoder.actiontext import ACTION_TEXT_FEATURES
 from anvil.training.dataset import (
     COMBAT_COUNT_MAX,
     _combat_label_window,
@@ -157,8 +158,7 @@ def _example(n_ent=8, **cmb):
         "players": torch.zeros(2, 6),
         "history": torch.full((8, 3), -1),
         "cand_rows": torch.tensor([-1]),
-        "cand_sa": torch.tensor([-1]),
-        "cand_kind": torch.tensor([-1]),
+        "cand_text": torch.zeros((1, ACTION_TEXT_FEATURES), dtype=torch.int64),
         "label": torch.tensor(0),
         "label_row": torch.tensor(-1),
         "tgt_kind": torch.full((5,), -1),

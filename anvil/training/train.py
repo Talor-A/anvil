@@ -24,7 +24,7 @@ The reader already knows the pieces this script assembles:
 
 main() flow:
 
-    build_net(embed, pool)        # CardEncoder + AnvilNet
+    build_net(embed, card_manifest) # CardEncoder + AnvilNet
     PriorityWindows × 3           # train / val / valpair splits
     AdamW + cosine LR + warmup
 
@@ -88,6 +88,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
+from anvil.encoder.actiontext import ACTION_TEXT_VERSION
 from anvil.encoder.cards import CardEncoder
 from anvil.encoder.cardtext import pool_features
 from anvil.encoder.transform import (
@@ -100,16 +101,13 @@ from anvil.encoder.transform import (
 from anvil.policy.model import AnvilNet
 from anvil.schemas.manifests import TrainConfig
 from anvil.torch.utils import get_torch_device
-from anvil.training.dataset import PriorityWindows, collate, default_methods, default_sa_vocab
+from anvil.training.dataset import PriorityWindows, collate, default_methods
 from anvil.utils.paths import stamp_name
 
 REPO = Path(__file__).parents[1]
 
 
-def build_net(embedding_stem: str, pool_manifest: str, n_methods: int, n_sa: int = 0) -> AnvilNet:
-    """n_sa: SA-string vocab size (M2 D2 SA-level candidates); 0 rebuilds the
-    M1 host-level architecture so pre-D2 checkpoints keep loading (the server
-    reads it from ckpt config's sa_vocab_size, absent = 0)."""
+def build_net(embedding_stem: str, pool_manifest: str, n_methods: int) -> AnvilNet:
     m = json.loads(Path(pool_manifest).read_text())
     meta = json.loads(Path(f"{embedding_stem}.json").read_text())
     feats = torch.from_numpy(pool_features(m, meta["names"]))
@@ -121,7 +119,6 @@ def build_net(embedding_stem: str, pool_manifest: str, n_methods: int, n_sa: int
         n_player_features=len(PLAYER_FEATURES),
         n_methods=n_methods,
         history_k=HISTORY_K,
-        n_sa=n_sa,
     )
 
 
@@ -148,7 +145,7 @@ def evaluate(net: AnvilNet, loader: DataLoader, device: str, max_batches: int) -
             out = net(batch)
         prio = batch["task"] == 0
         pred = out["policy_logits"].argmax(1)
-        valid = batch["label"] >= 0  # SA-level label resolved
+        valid = batch["label"] >= 0  # action-text label resolved
         lab = batch["label"].clamp(min=0)
         ok = (pred == lab) & prio & valid
         multi = (batch["cand_mask"].sum(1) > 1) & prio  # single-legal-option exclusion
@@ -295,8 +292,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     methods = default_methods()
-    sa_vocab = default_sa_vocab()
-    net = build_net(a.embed, a.pool_manifest, len(methods), n_sa=len(sa_vocab)).to(device)
+    net = build_net(a.embed, a.pool_manifest, len(methods)).to(device)
     if a.null_text:
         with torch.no_grad():
             net.cards.text.zero_()  # type: ignore[operator]
@@ -330,8 +326,7 @@ def main() -> None:
         **vars(a),
         "params": n_params,
         "methods_version": 1,
-        "sa_vocab_version": 1,
-        "sa_vocab_size": len(sa_vocab),
+        "action_text_version": ACTION_TEXT_VERSION,
         "transform_version": TRANSFORM_VERSION,
         "embed_meta": json.loads(Path(f"{a.embed}.json").read_text()),
     }

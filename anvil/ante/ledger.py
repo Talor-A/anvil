@@ -62,6 +62,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from anvil.encoder.actiontext import ACTION_TEXT_FEATURES
 from anvil.encoder.transform import HISTORY_K, assemble, history_tokens
 from anvil.schemas.tensors import Example
 from anvil.store.trajectories import GameTrajectory
@@ -270,9 +271,7 @@ class ValueEvaluator:
         ck = torch.load(ckpt, map_location=self.device, weights_only=False)
         cfg = ck["config"]
         methods = default_methods()
-        self.net = build_net(
-            cfg["embed"], cfg["pool_manifest"], len(methods), n_sa=cfg.get("sa_vocab_size", 0)
-        ).to(self.device)
+        self.net = build_net(cfg["embed"], cfg["pool_manifest"], len(methods)).to(self.device)
         self.net.load_compat(ck["model"])
         self.net.eval()
         # full-vis critics (M2 D4) evaluate on full-vis windows — §7's
@@ -323,8 +322,7 @@ class ValueEvaluator:
             "players": torch.from_numpy(out["players"]),
             "history": torch.from_numpy(hist),
             "cand_rows": z([-1]),
-            "cand_sa": z([-1]),
-            "cand_kind": z([-1]),
+            "cand_text": torch.zeros((1, ACTION_TEXT_FEATURES), dtype=torch.int64),
             "label": z(0),
             "label_row": z(-1),
             "tgt_kind": torch.full((T_MAX + 1,), -1, dtype=torch.int64),

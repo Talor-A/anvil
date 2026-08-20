@@ -195,30 +195,23 @@ class ModelBackend:
         import torch
 
         from anvil.bridge.featurize import Featurizer
+        from anvil.encoder.actiontext import ACTION_TEXT_VERSION
         from anvil.training.dataset import default_methods
         from anvil.training.train import build_net
 
         self.torch = torch
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         cfg = ckpt["config"]
-        # sa_vocab_size absent = pre-D2 host-level checkpoint: the model has
-        # no SA descriptor and answers host_level=True (Java runs the full
-        # disambiguation ladder). D2+ checkpoints name the SA themselves.
-        self.n_sa = cfg.get("sa_vocab_size", 0)
+
+        if cfg.get("action_text_version") != ACTION_TEXT_VERSION:
+            raise ValueError("checkpoint does not use the current action-text representation")
         # trained combat heads present? (D5 checkpoints; pre-D5 ones get
         # fresh-init heads from load_compat and must not serve combat tags)
         self.has_combat = any(k.startswith(("atk_", "blk_", "cmb_")) for k in ckpt["model"])
-        self.net = build_net(
-            cfg["embed"], cfg["pool_manifest"], len(default_methods()), n_sa=self.n_sa
-        ).to(device)
+        self.net = build_net(cfg["embed"], cfg["pool_manifest"], len(default_methods())).to(device)
         self.net.load_compat(ckpt["model"])
         self.net.eval()
         self.feat = Featurizer(cfg["embed"], default_methods())
-        if self.n_sa and self.n_sa != len(self.feat.sa_vocab):
-            raise ValueError(
-                f"checkpoint sa_vocab_size {self.n_sa} != pinned sa_vocab "
-                f"{len(self.feat.sa_vocab)} — serve/train vocab skew"
-            )
         self.pass_delta = pass_delta
         self.device = device
         self.counts: Counter[str] = Counter()
@@ -347,10 +340,9 @@ class ModelBackend:
             self.counts["pass"] += 1
             return cp  # spell_option 0 = pass (label-space convention)
         cp.spell_option = aux["cand_first_opt"][choice] + 1
-        # SA-level model (D2+): the option index IS the chosen SA — the Java
-        # ladder skips its kind/order rungs (shape->pay only). Host-level
-        # checkpoints keep the full ladder.
-        cp.host_level = self.n_sa == 0
+        # The chosen candidate names a concrete action, so the Java realizer
+        # can skip host-level disambiguation and proceed to shape/payability.
+        cp.host_level = False
         n_ent, stop = int(out["n_ent"]), int(out["stop_idx"])
         for t in range(out["tgt_picks"].shape[1]):
             pick = int(out["tgt_picks"][0, t])

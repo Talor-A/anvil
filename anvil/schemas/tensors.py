@@ -24,7 +24,7 @@ The pipeline has two distinct shapes for the same logical record:
 Example (TypedDict, total=True)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 One decision window *before* batching.  Every field named in transform.py shows up here:
-entities, globals, players, history, cand_rows, cand_sa, cand_kind, label, label_row,
+entities, globals, players, history, cand_rows, cand_text, label, label_row,
 x_val, task, bool_label, num_label, num_lo, num_hi, ctx_row, forced, has_outcome, won,
 cmb_rows, cmb_count, cmb_count_label, blk_atk_rows, atk_label, atk_tgt_kind,
 atk_tgt_idx, blk_label, plus the optional tgt_kind and tgt_idx.
@@ -79,8 +79,7 @@ class Example(TypedDict, total=True):
     players: torch.Tensor
     history: torch.Tensor
     cand_rows: torch.Tensor
-    cand_sa: torch.Tensor
-    cand_kind: torch.Tensor
+    cand_text: torch.Tensor
     label: torch.Tensor
     label_row: torch.Tensor
     tgt_kind: NotRequired[torch.Tensor]
@@ -112,8 +111,7 @@ class Batch(TypedDict, total=True):
     ent_emb: torch.Tensor
     ent_mask: torch.Tensor
     cand_rows: torch.Tensor
-    cand_sa: torch.Tensor
-    cand_kind: torch.Tensor
+    cand_text: torch.Tensor
     cand_mask: torch.Tensor
     globals: torch.Tensor
     players: torch.Tensor

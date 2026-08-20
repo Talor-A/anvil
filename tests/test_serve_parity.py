@@ -50,26 +50,21 @@ def test_featurizer_matches_loader_and_act_matches_forward():
     import torch
 
     from anvil.bridge.featurize import Featurizer
-    from anvil.training.dataset import PriorityWindows, collate, default_methods
+    from anvil.training.dataset import collate, default_methods
 
     methods = default_methods()
     stem = str(EMBED).removesuffix(".safetensors")
     feat = Featurizer(stem, methods)
-    ds = PriorityWindows(str(STORE), stem, methods)
 
     net = None
     if CKPT.exists():
         from anvil.training.train import build_net
 
         ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
-        net = build_net(
-            stem,
-            ckpt["config"]["pool_manifest"],
-            len(methods),
-            n_sa=ckpt["config"].get("sa_vocab_size", 0),
-        )
-        net.load_compat(ckpt["model"])  # task_emb grew at D5 (attack/block)
-        net.eval()
+        if "action_text_version" in ckpt["config"]:
+            net = build_net(stem, ckpt["config"]["pool_manifest"], len(methods))
+            net.load_compat(ckpt["model"])
+            net.eval()
 
     checked = 0
     for dec, header, prior in _priority_windows():
@@ -99,24 +94,23 @@ def test_featurizer_matches_loader_and_act_matches_forward():
         hist_serve = ex_serve["history"].numpy()
         for i, (m, s, r) in enumerate(hist_train):
             assert hist_serve[i][1] == s and hist_serve[i][2] == r
-        # candidates: loader construction on the same opts (M2 D2 SA level)
-        from anvil.training.dataset import KINDS, norm_sa
+        # candidates: loader construction on the same normalized action text
+        from anvil.encoder.actiontext import action_text_tokens
+        from anvil.training.dataset import action_tokens, canonical_action_text
 
-        key_of, cand_train, sa_train, kind_train = {}, [-1], [-1], [-1]
+        key_of, cand_train, text_train = {}, [-1], [action_text_tokens("")]
         for o in dec.get("opts") or []:
             r = row_of.get(o.get("e"))
             if r is None:
                 continue
-            key = (r, norm_sa(o.get("sa", "")))
+            key = (r, canonical_action_text(o.get("sa", "")))
             if key in key_of:
                 continue
             key_of[key] = len(cand_train)
             cand_train.append(r)
-            sa_train.append(ds.sa_vocab.id(key[1]))
-            kind_train.append(KINDS.get(o.get("kind"), KINDS["other"]))
+            text_train.append(action_tokens(key[1]))
         assert cand_train == ex_serve["cand_rows"].tolist()
-        assert sa_train == ex_serve["cand_sa"].tolist()
-        assert kind_train == ex_serve["cand_kind"].tolist()
+        assert text_train == ex_serve["cand_text"].tolist()
 
         if net is not None:
             batch = collate([ex_serve])
@@ -166,14 +160,10 @@ def test_combat_featurizer_matches_loader():
         from anvil.training.train import build_net
 
         ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
-        net = build_net(
-            stem,
-            ckpt["config"]["pool_manifest"],
-            len(methods),
-            n_sa=ckpt["config"].get("sa_vocab_size", 0),
-        )
-        net.load_compat(ckpt["model"])
-        net.eval()
+        if "action_text_version" in ckpt["config"]:
+            net = build_net(stem, ckpt["config"]["pool_manifest"], len(methods))
+            net.load_compat(ckpt["model"])
+            net.eval()
 
     checked_a = checked_b = 0
     for dec, header, prior, decs, i in _combat_windows():
@@ -244,12 +234,9 @@ def test_load_compat_zero_pads_cmd_tax_column():
 
     stem = str(EMBED).removesuffix(".safetensors")
     ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
-    net = build_net(
-        stem,
-        ckpt["config"]["pool_manifest"],
-        len(default_methods()),
-        n_sa=ckpt["config"].get("sa_vocab_size", 0),
-    )
+    if "action_text_version" not in ckpt["config"]:
+        pytest.skip("legacy fixed-action-vocabulary checkpoint")
+    net = build_net(stem, ckpt["config"]["pool_manifest"], len(default_methods()))
     net.load_compat(ckpt["model"])
     w = net.assemble.ent_proj.weight
     saved_cols = ckpt["model"]["assemble.ent_proj.weight"].shape[1]

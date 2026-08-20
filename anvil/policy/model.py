@@ -53,8 +53,8 @@ decision the agent must produce on a Magic: The Gathering turn.
 
 ### 1. Policy head — pointer over candidates
 
-Index 0 is always PASS. Indices 1..C point at rows in the candidate pool
-(each row is a (host entity, SA descriptor) pair).
+Index 0 is always PASS. Indices 1..C are the legal actions supplied for this
+decision (each action pairs a host entity with its text embedding).
 
 ```
 query = W_q @ [STATE]                         # (B, 1, d)
@@ -65,9 +65,10 @@ logit = query·k_cand / √d                     # (B, C)
 logit[:, 0] = pass_head([STATE]) + pass_delta # calibrated bias
 ```
 
-When `n_sa > 0` the key gets a learned SA-string-vocab + kind embedding.
-When `n_sa = 0` it reproduces the simple host-level architecture (needed
-for backward-compatible checkpoint loading).
+The host key is augmented by an open-vocabulary embedding of the action's
+normalized text.  Text features are produced for every candidate at both
+training and serving time; no corpus-derived action table or OOV action row is
+part of the checkpoint.
 
 ### 2. Target decoder — autoregressive pointer over slots
 
@@ -192,6 +193,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from anvil.encoder.actiontext import ActionTextEncoder
 from anvil.encoder.cards import CardEncoder
 from anvil.schemas.tensors import Batch
 from anvil.state.tokens import StateAssembler
@@ -210,7 +212,6 @@ class AnvilNet(nn.Module):
         d_model: int = 512,
         n_heads: int = 8,
         n_layers: int = 10,
-        n_sa: int = 0,
     ):
         super().__init__()
         self.cards = card_encoder
@@ -240,16 +241,10 @@ class AnvilNet(nn.Module):
         )
         self.ptr_query = nn.Linear(d_model, d_model)
         self.ptr_key = nn.Linear(d_model, d_model)
-        # SA-level candidates (M2 D2): the pointer key is the host entity's
-        # trunk output plus a learned SA-descriptor vector (string-vocab
-        # embedding + kind). n_sa=0 reproduces the M1 host-level architecture
-        # (old checkpoints load and serve unchanged).
-        if n_sa:
-            self.sa_emb = nn.Embedding(n_sa + 1, 64)  # +1 = OOV id
-            self.kind_emb = nn.Embedding(4, 8)  # dataset.KINDS
-            self.sa_proj = nn.Linear(64 + 8, d_model)
-        else:
-            self.sa_emb = None
+        # Candidate identity is the legal action's text, not a row in a
+        # corpus-fixed action vocabulary.  The host entity remains a separate
+        # channel so identical text on different objects is distinguishable.
+        self.action_text = ActionTextEncoder(d_model)
         self.value_head = nn.Sequential(
             nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, 1)
         )
@@ -307,6 +302,12 @@ class AnvilNet(nn.Module):
         last ent_proj input column). Saved weights get a ZERO-padded new
         column — zero, not fresh init, so pre-D1 checkpoints produce
         byte-identical outputs until the feature is trained."""
+        legacy_action = {"sa_emb.weight", "kind_emb.weight", "sa_proj.weight", "sa_proj.bias"}
+        if legacy_action & state.keys():
+            raise RuntimeError(
+                "legacy fixed-action-vocabulary checkpoint cannot load into the "
+                "action-text model; train a new checkpoint"
+            )
         cur = self.task_emb.weight
         saved = state.get("task_emb.weight")
         if saved is not None and saved.shape[0] < cur.shape[0]:
@@ -335,24 +336,15 @@ class AnvilNet(nn.Module):
         # server batching: priority items carry the calibration delta,
         # other tasks 0) — broadcasts onto the PASS logit either way.
         """Pointer logits over candidates: index 0 = PASS, rest gather host
-        rows; with SA-level candidates (n_sa > 0) the key adds a learned
-        SA-descriptor vector. Shared by forward() and act() — the plumbing
-        must not fork."""
+        rows and add an open-vocabulary action-text embedding. Shared by
+        forward() and act() — the plumbing must not fork."""
         q = self.ptr_query(state).unsqueeze(1)  # (B,1,d)
         k = self.ptr_key(ent_out)  # (B,N,d)
         rows = batch["cand_rows"].clamp(min=0)  # (B,C); 0-safe gather
         k_cand = k.gather(1, rows.unsqueeze(-1).expand(-1, -1, k.shape[-1]))
-        if self.sa_emb is not None:
-            sa = self.sa_proj(
-                torch.cat(
-                    [
-                        self.sa_emb(batch["cand_sa"].clamp(min=0)),
-                        self.kind_emb(batch["cand_kind"].clamp(min=0)),
-                    ],
-                    dim=-1,
-                )
-            )
-            k_cand = k_cand + sa * (batch["cand_sa"] >= 0).unsqueeze(-1)  # PASS/pad: none
+        action = self.action_text(batch["cand_text"])
+        has_text = batch["cand_text"].ne(0).any(-1)
+        k_cand = k_cand + action * has_text.unsqueeze(-1)
         logits = (q * k_cand).sum(-1) / k.shape[-1] ** 0.5  # (B,C)
         pass_logit = self.pass_head(state) + pass_delta  # (B,1)
         logits = torch.cat([pass_logit, logits[:, 1:]], dim=1)  # slot 0 = PASS
@@ -660,7 +652,7 @@ class AnvilNet(nn.Module):
     ) -> dict:
         out = self(batch)
         prio = batch["task"] == 0
-        # label -1 = SA-level-ambiguous (masked from the policy loss; the
+        # label -1 = action-text-ambiguous (masked from the policy loss; the
         # window still trains value and contributes host-level metrics)
         valid = batch["label"] >= 0
         lab = batch["label"].clamp(min=0)
