@@ -57,6 +57,13 @@ def test_forge_text_normalization_removes_only_incidental_variation():
     assert action_tokens("{T}: Add {U}.") != action_tokens("{T}: Add {W}.")
 
 
+def test_long_action_features_cover_the_tail():
+    prefix = "Counter target spell. " * 20
+    assert action_text_tokens(prefix + "Draw a card.") != action_text_tokens(
+        prefix + "Create a Treasure token."
+    )
+
+
 def test_legacy_action_vocab_checkpoint_has_a_clear_boundary():
     from anvil.policy.model import AnvilNet
 

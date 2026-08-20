@@ -185,8 +185,8 @@ _ROUTE_ID = re.compile(r"(\bby\s+[^()]*?) \(\d+\)")
 
 
 def norm_sa(sa: str) -> str:
-    # Forge's render is capped at 120 characters and frequently leaves
-    # incidental trailing spaces; trim only whitespace and decision-time X.
+    # Forge's render has a generous 1024-character safety cap and frequently
+    # leaves incidental trailing spaces; trim only whitespace and decision-time X.
     # Source-route suffixes remain because they can distinguish legal options.
     return _X_SUFFIX.sub("", sa.strip())
 

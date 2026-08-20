@@ -24,7 +24,7 @@ Validator checks, per priority decision:
                    candidate basis).
   5. play match  — the next playChosenSpellAbility window for the same seat
                    names the same SA (string prefix match; the census arg is
-                   truncated at 60 chars, the label at 120).
+                   truncated at 60 chars, the action label at 1024).
 
 Everything here is read-only over a TrajectoryStore; Magic stays data (kind
 strings, cost names are opaque vocabularies per the schema's hygiene rule).
@@ -46,7 +46,7 @@ class CastPlan:
     """One chosen SpellAbility, decision-time state read off the SA."""
 
     host: int | None  # host card entity id ("e")
-    sa: str  # debug/join string, truncated at 120
+    sa: str  # debug/join string, safety-capped at 1024
     kind: str  # "land" | "spell" | "ability" | "other"
     targets: list[dict[str, Any]]  # {"e":id} | {"pi":seat} | {"e":id,"stk":1}
     x: int | None

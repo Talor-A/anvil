@@ -20,7 +20,9 @@ from torch import nn
 
 ACTION_TEXT_VERSION = 1
 ACTION_TEXT_BUCKETS = 32768
-ACTION_TEXT_FEATURES = 96
+ACTION_TEXT_LEXICAL_FEATURES = 192
+ACTION_TEXT_CHARACTER_FEATURES = 64
+ACTION_TEXT_FEATURES = ACTION_TEXT_LEXICAL_FEATURES + ACTION_TEXT_CHARACTER_FEATURES
 _TOKEN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 
 
@@ -39,26 +41,37 @@ def _action_text_tokens_cached(text: str) -> tuple[int, ...]:
     """Cached immutable core shared by training workers and the server.
 
     Word unigrams and bigrams retain broad semantics; character trigrams let
-    unseen names and rules words share fragments with training text. Hash
-    buckets are an implementation detail, not IDs for complete actions.
+    unseen names and rules words share fragments with training text. Long
+    actions are sampled evenly instead of prefix-truncated, so the whole
+    rendered action can affect its representation. Hash buckets are an
+    implementation detail, not IDs for complete actions.
     """
     text = unicodedata.normalize("NFKC", text).casefold().strip()
     if not text:
         return (0,) * ACTION_TEXT_FEATURES
 
     words = _TOKEN.findall(text)
-    # Put whole-word semantics first so long names near the front cannot crowd
-    # the rest of the action out with character fragments. N-grams then fill
-    # the remaining budget for open-vocabulary sharing.
-    features = [f"w:{word}" for word in words]
-    features.extend(f"b:{a}\0{b}" for a, b in zip(words, words[1:]))
+    lexical = [f"w:{word}" for word in words]
+    lexical.extend(f"b:{a}\0{b}" for a, b in zip(words, words[1:]))
+    chars: list[str] = []
     for word in words:
         if len(word) >= 3:
             marked = f"^{word}$"
-            features.extend(f"c:{marked[j : j + 3]}" for j in range(len(marked) - 2))
+            chars.extend(f"c:{marked[j : j + 3]}" for j in range(len(marked) - 2))
 
-    ids = [_bucket(feature) for feature in features[:ACTION_TEXT_FEATURES]]
+    features = _spread(lexical, ACTION_TEXT_LEXICAL_FEATURES)
+    features.extend(_spread(chars, ACTION_TEXT_CHARACTER_FEATURES))
+    ids = [_bucket(feature) for feature in features]
     return tuple(ids + [0] * (ACTION_TEXT_FEATURES - len(ids)))
+
+
+def _spread(features: list[str], limit: int) -> list[str]:
+    """Keep up to ``limit`` features distributed across the complete text."""
+    if len(features) <= limit:
+        return features
+    if limit == 1:
+        return [features[len(features) // 2]]
+    return [features[i * (len(features) - 1) // (limit - 1)] for i in range(limit)]
 
 
 class ActionTextEncoder(nn.Module):
