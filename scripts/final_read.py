@@ -26,7 +26,7 @@ TRAJ_DIR = Path("data/trajectories")
 def main() -> None:
     # Detached stdout to a redirected log is BLOCK-buffered, so a log-tail
     # watcher sees nothing until exit (run-8 held 36h of narration in memory).
-    # The driver fixed this for itself on 2026-07-25; reads never got it.
+    # The driver fixed its own line buffering; reads never got it.
     sys.stdout.reconfigure(line_buffering=True)
 
     ap = argparse.ArgumentParser(description="2,000-game corrected read")
@@ -45,7 +45,7 @@ def main() -> None:
         default=None,
         help="pool manifest version to stamp on the runs. Default "
         "resolves the same manifest the harness would use "
-        "(the data/pool/CURRENT pin since 2026-08-03; the "
+        "(the data/pool/CURRENT pin; the "
         "old mtime-selection hazard is retired) — ingest "
         "warns 'provenance is incomplete' without it.",
     )

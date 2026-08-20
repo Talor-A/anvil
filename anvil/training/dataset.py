@@ -1,11 +1,30 @@
-"""Decision-window dataset over a TrajectoryStore (M1 D4/D5).
+"""Training dataset — reads stored game trajectories and yields one Example
+per decision "window", one task per window type. Also defines the task
+taxonomy and the machinery that resolves expert choices into model labels.
+This is the most Magic-specific module in the pipeline.
 
-Streams games (IterableDataset — random access would decode a whole zstd
-frame per sample), yields one task-tagged example per rung-1 decision:
-priority windows (the bulk) plus the one-field family (mull_keep/mull_tuck/
-trigger/binary/number — see TASKS). Every example carries the same state
-tensors; task-specific label fields are pad values (-1) elsewhere. Priority
-examples:
+Prior modules gave you the per-game transform that builds state tensors per
+*decision* (features, tensor types, card encoder, state assembler, model
+architecture). This module is what you wrap *around* that transform to turn an
+archive of finished games into a pytorch IterableDataset that a trainer can
+shuffle, batch, and feed to the model.
+
+---
+Task taxonomy
+
+Every window is tagged with exactly one task. All tasks share the same state
+tensors; task-specific label fields are pad values (-1) everywhere else.
+
+  priority (bulk)   -- choose spell/ability to play.  Candidate 0 = PASS.
+  mull_keep (bool)  -- keep or mulligan?
+  mull_tuck (tgt)   -- which cards to return?
+  trigger (bool)    -- yes/no on trigger.
+  binary (bool)     -- binary mode choice.
+  number (num)      -- choose X.
+  attack (combat)   -- per-creature attack declarations.
+  block (combat)    -- per-creature block declarations.
+
+Example shape (priority shown; others subset these fields):
 
   entities   (N, F) float32   dedup-group rows from the transform
   ent_emb    (N,)   int64     row into the embedding cache (-1 = hidden/token)
@@ -15,63 +34,92 @@ examples:
   cand_rows  (C,)   int64     candidate source rows; index 0 is always PASS (-1)
   cand_sa    (C,)   int64     SA-string vocab id per candidate (-1 = PASS/pad)
   cand_kind  (C,)   int64     KINDS id per candidate (-1 = PASS/pad)
-  label      ()     int64     index into cand_rows the expert chose; -1 = the
-                              SA-level label is ambiguous (masked from policy
-                              loss; measured ~0.003% of casts, D2 sweep)
-  label_row  ()     int64     expert's chosen HOST row (-1 = pass) — the
-                              host-level agreement basis (continuity with M1),
-                              known even when the SA-level label is masked
-  has_outcome / won ()        value-head target (games without outcomes carry
-                              has_outcome=0 and are excluded from value loss)
+  label      ()     int64     index into cand_rows the expert chose;
+                              -1 = masked from policy loss
+  label_row  ()     int64     expert's chosen HOST row (-1 = pass)
+  has_outcome / won ()        value-head target (0 = no outcome available)
 
-Design notes:
-- All windows kept, pass included as candidate 0 (m1-bc-plan: imbalance is a
-  training-time knob — weighting/downsampling lives in the sampler, not here).
-- Candidates are (host dedup-group row, normalized SA string) pairs from the
-  logged timing-legal options (ADR-0005 basis; M2 D2 moves the interface from
-  host rows to SAs). Identical (row, sa) options collapse into ONE candidate:
-  entity-level duplicates are §2 multiset semantics ("a Rat Colony"), and
-  SA-level duplicates (commander permission routes, same-rendering cost
-  variants) are indistinguishable to the model anyway — collapsing them makes
-  the expert label exact at candidate level; the executor keeps first-fit for
-  the residual engine-side tie.
-- Labels resolve in order: exact logged option index ("oi", rets since
-  2026-07-10) -> exact normalized-string match at the chosen host -> prefix-min
-  match (the option/plan serializations truncate at different lengths) ->
-  masked (-1). Masked windows keep their state, host-level label, and value
-  target; the target/X heads are padded out (their conditioning is the chosen
-  candidate, which is exactly what is unknown).
-- entity_row_of is loader plumbing (label/candidate resolution); it is never
-  a model input, so entity ids stay out of the information set.
-- Windows whose chosen host resolves to no candidate row are IMPOSSIBLE by
-  ADR-0005 construction; the loader raises rather than skipping (a silent
-  skip here would hide exactly the corpus-poisoning class the validator
-  exists to catch).
+---
+Candidate resolution for priority windows
 
-Combat examples (M2 D5, tasks attack/block) add per-candidate-row fields
-(pad -1 / empty on other tasks; batch-padded in collate):
+When the expert played a spell, the logged decision contains a list of
+"legal options" — every game object the engine said was playable at that
+moment. We turn each option into a candidate:
 
-  cmb_rows        (A,) int64  candidate creature dedup rows (derived basis:
-                              decider's battlefield creatures, untapped
-                              [+unsick for attacks] — certified label superset)
-  cmb_count       (A,) int64  dedup-group size (clamped COMBAT_COUNT_MAX)
-  atk_label       (A,) int64  attack task: 1/0 per row
-  cmb_count_label (A,) int64  k-1 class for multi-groups that acted (both tasks)
-  atk_tgt_kind/idx(A,) int64  attack target per attacking row (0=entity row,
-                              1=player position; -1 = none or mixed-in-group,
-                              masked) -> collate builds atk_tgt_labels class ids
-  blk_label       (A,) int64  block task: index into blk_atk_rows, or the none
-                              class (per-example len(blk_atk_rows), remapped to
-                              the batch none slot M in collate); -1 = masked
-                              (multi-block or group split across attackers)
-  blk_atk_rows    (M,) int64  attacker rows in the dec obs (pointer key set)
+  candidate 0  = PASS (always present; the model must learn when passing
+                 is optimal)
+  candidates 1+ = (entity_row, normalized SA string) pairs, one per
+                  distinct legal option
 
-Labels come from the obs-side join (_combat_label_window): the declare
-callbacks never serialized rets, but post-declaration windows carry atk/blk
-flags. The join is bounded at the next declareAttackers dec — turn-only
-bounding poisoned 145 corpus block labels via extra-combat overshoot
-(classified 2026-07-13). Forced-empty windows (no candidates / no attackers)
-are skipped: nothing to learn, and serve answers them without the model.
+Identical (row, SA) pairs collapse into ONE candidate. Why? Two sources of
+duplication:
+
+  *Entity-level duplicates* — multiset semantics. If you control two "Rat
+  Colony", both rats share the same dedup-group row in the state transform.
+  They are indistinguishable to the model until something distinguishes
+  them (e.g., one is summoned sick). Collapsing them avoids leaking
+  oracle-order information.
+
+  *SA-level duplicates* — the engine sometimes produces the same
+  spell/ability through different permission routes (e.g., a commander
+  that can be cast from the command zone *and* from the graveyard, but
+  both render the same SA string). The model can't tell them apart, so
+  they shouldn't be separate candidates.
+
+Resolving the expert's choice to a label index:
+
+  resolve(expert_action, candidates):
+    1. exact logged option index ("oi")  -- engine's own enumeration
+       -> match if present in stored trajectory
+    2. exact normalized-string match at the chosen host
+       -> match the SA string against candidate SA strings
+    3. prefix-min match
+       -> option serializations truncate at different lengths; take the
+          shortest prefix that uniquely identifies a candidate
+    4. fallback: mask (-1)
+       -> the expert action is *ambiguous* at SA-string granularity.
+          These windows still carry state and value targets, but the
+          policy head is masked out. (~0.003% of priority windows.)
+
+A window whose chosen host resolves to *no* candidate row is an error
+(corpus corruption) and raises — silence here would poison training data.
+
+---
+Combat labels (tasks: attack, block)
+
+Combat decisions are inherently *per-creature*, so they get extra per-row
+fields keyed to candidate creature rows:
+
+  cmb_rows        (A,) int64   creature dedup rows on the decider's battlefield
+  cmb_count       (A,) int64   dedup-group size (clamped)
+  atk_label       (A,) int64   1/0 per row (attack task)
+  cmb_count_label (A,) int64   k-1 class for multi-groups that acted
+  atk_tgt_kind / idx (A,) int64   attack target encoding
+  blk_label       (A,) int64   index into blk_atk_rows, or none class
+  blk_atk_rows    (M,) int64   attacker rows in the decision obs
+
+Where do combat labels come from? The declare-attackers / declare-blockers
+callbacks never serialized return values in the stored trajectory. But the
+*next* observation (after the declaration) shows which creatures are now
+tapping / blocking. The loader joins those post-declaration observations to
+derive labels (_combat_label_window).
+
+Critical: the join is bounded at the *next declareAttackers* decision window.
+A turn-only boundary is not enough — it can overshoot into the opponent's
+combat and poison labels (145 corrupted block labels caught in an
+audit).
+
+Forced-empty windows (no candidates / no attackers) are skipped at dataset
+construction — nothing to learn, and the inference server handles those
+without invoking the model.
+
+---
+Collation
+
+collate() pads all variable-dimension fields to the batch maximum per field.
+Parallel mask tensors tell the model which slots are real and which are pad.
+Combat fields are pad -1 on non-combat tasks; collate extends them to the
+batch max creature count.
 """
 
 from __future__ import annotations
@@ -217,7 +265,7 @@ def _combat_label_window(decs: list[dict], i: int, turn: int, flag: str) -> dict
     the next declareAttackers dec, not just the turn: extra-combat turns
     re-enter declare, and a turn-only bound let a no-block combat inherit a
     later combat's map (all 145 corpus block violations were this overshoot;
-    classified 2026-07-13, scripts/d5/classify_block_violations.py)."""
+    see scripts/d5/classify_block_violations.py)."""
     for d in decs[i + 1 :]:
         if d.get("m") == "declareAttackers":
             return None
@@ -340,8 +388,8 @@ def block_fields(
             if row_of.get(aid) not in slot:
                 raise ValueError(
                     f"game {g} s={dec.get('s')}: blocked target {aid} is not an "
-                    "attacker in the dec obs — the combat-bounded join should "
-                    "make this impossible (classified 2026-07-13)"
+                    "attacker in the dec obs — the combat-bounded join"
+                    "makes this structurally impossible"
                 )
     none = len(atk_rows)
     out = {
@@ -406,8 +454,8 @@ class PriorityWindows(IterableDataset):
         traj = store.game(g)
         # TRUE winner via the store's outcome records (games.jsonl): the frame
         # end-record's "winner" was derived from the post-elimination live
-        # player list in the fork (~always 0, wrong ~50% of games — found
-        # 2026-07-11). Value labels before this fix were seat noise.
+        # player list in the fork (~always 0, wrong ~50% of games).
+        # Value labels before this fix were seat noise.
         winner = store.winner_seat(g)
         has_outcome = 1 if winner is not None else 0
         winner = -1 if winner is None else winner

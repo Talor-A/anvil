@@ -1,10 +1,80 @@
-"""BC training loop (M1 D5). uv run python -m anvil.training.train ...
+"""Behavior cloning (BC) training loop.
 
-Metrics discipline (m1-bc-plan D7, ADR-0005): the headline eval number is
-agreement EXCLUDING single-legal-option windows (candidate basis: pass-only
-windows are the forced ones), with raw and pass-excluded agreement reported
-alongside. Every eval row lands in metrics.jsonl; checkpoints carry the full
-config + data pins.
+`uv run python -m anvil.training.train` -- reads trajectory stores, builds an
+AnvilNet (`anvil.policy.model`), and trains it via supervised learning on
+expert decisions. This is how the policy learns to play Magic: the Gathering.
+
+Why is training a standalone script instead of a method on AnvilNet? Because
+training is a *recipe*, not part of the architecture. The same AnvilNet class
+powers different training regimes (BC, RL, fine-tuning) from different scripts.
+This module bakes one specific recipe -- the data mix, loss weighting,
+learning-rate schedule, and evaluation strategy that produce our production BC
+policy.
+
+The reader already knows the pieces this script assembles:
+
+  - Transform (`anvil.encoder.transform`) turns raw observations into dense
+    float32 tensors (entity rows, globals, players, history).
+  - CardEncoder (`anvil.encoder.cards`) wraps those rows with learned embeddings.
+  - AnvilNet (`anvil.policy.model`) stacks a transformer trunk on top, with
+    separate heads for each rung-1 decision type (policy, target, X, value,
+    bool, num, combat).
+  - PriorityWindows (`anvil.training.dataset`) streams decision windows out of
+    a TrajectoryStore, yielding one example per priority decision.
+
+main() flow:
+
+    build_net(embed, pool)        # CardEncoder + AnvilNet
+    PriorityWindows × 3           # train / val / valpair splits
+    AdamW + cosine LR + warmup
+
+    loop over train_loader:
+        batch: entities, candidates, labels, ...
+        losses = net.losses(batch, pass_weight=...)  # dict: loss, policy, target, x, value, ...
+        losses["loss"].backward()
+        clip_grad_norm_(1.0)
+        opt.step()
+
+        if step % eval_every == 0 or step is final:
+            evaluate(net, val_loader)
+            evaluate(net, vp_loader)         # held-out pair games
+
+── Metrics ──────────────────────────────────────────────────────────
+
+`evaluate()` is where the module's metrics discipline lives. The headline
+number is `agree_honest` -- accuracy *excluding* windows with only one legal
+option (those are trivially correct). This is the metric runs get compared on.
+
+The family:
+
+  agree_honest     agreement on multi-option windows
+  agree_raw        agreement on *all* priority windows (includes forced choices)
+  agree_nonpass    agreement on non-PASS decisions within the honest set
+  acc_target/X     per-task targeting heads
+  acc_mull/trigger/bool/number   one-field decision heads
+  acc_atk_row/win, acc_blk_row/win   combat heads (row-level per candidate
+                   and window-level exact match)
+  value_bce        binary cross-entropy of win-probability vs outcome
+
+Every eval row (and per-100-step training loss) lands in `metrics.jsonl`.
+Checkpoints (state_dict + full config) go to `last.pt`.
+
+── The pass-weight trick ────────────────────────────────────────────
+
+PASS is ~90% of decisions but carries near-zero skill signal -- a model that
+always picks PASS would score 90% "raw" agreement but play terribly.
+`--pass-weight` (default 0.1) scales down the PASS contribution to the loss:
+
+    ┌─────────────┬──────────┬──────────────┐
+    │ Decisions   │   Share  │ Loss weight  │
+    ├─────────────┼──────────┼──────────────┤
+    │ PASS        │   ~90%   │  pass-weight │
+    │ non-PASS    │   ~10%   │  1.0         │
+    └─────────────┴──────────┴──────────────┘
+
+With --pass-weight 0.1, PASS contributes ~9x less gradient per decision than
+a mulligan or combat choice. The model learns to *act* instead of defaulting
+to pass.
 """
 
 from __future__ import annotations
@@ -195,9 +265,9 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--warmup", type=int, default=500)
     ap.add_argument("--steps", type=int, default=20000)
-    # sweep 2026-07-07 (runs 4/6/7, full epoch): 1.0->0.3 buys +7.3pp nonpass
+    # Sweep results: 1.0->0.3 pass-weight bought +7.3pp nonpass
     # for -0.4pp honest, 0.3->0.1 another +3.7pp for -1.3pp; targets/X/value
-    # flat throughout. 0.1 = action-rich prior for M2; the honest cost is the
+    # flat throughout. 0.1 = action-rich prior; the honest cost is the
     # pass boundary, recalibratable post-hoc via a PASS-logit offset
     ap.add_argument("--pass-weight", type=float, default=0.1)
     ap.add_argument(

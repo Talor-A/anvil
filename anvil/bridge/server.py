@@ -1,26 +1,61 @@
-"""Anvil decision server (M0 echo/random + M1 model): answers DecisionBridge sessions.
+"""gRPC inference server for the game engine's decision bridge.
 
-Modes:
-- echo   -- echo the worker's pre-drawn answer back (bridge-tax instrument:
-            gRPC-arm games are bit-identical to local-arm games, so the
-            throughput delta isolates serialization + transport).
-- random -- answer uniformly at random server-side, seeded per game from
-            GameStart.seed (deterministic per seed; the M1-shaped mode).
-- model  -- M1 D8: featurize the wire observation (same code path as the
-            training loader), run AnvilNet.act, answer CastPlans + one-field
-            tags. --ckpt required; --pass-delta is the calibration arm knob
-            (pass_calibration.json "delta"). mtg.mulligan_tuck stays
-            heuristic-fallback at D8 (SELECT_K answer mapping deferred).
+The game engine calls this server for every decision its players make.
+Each worker opens one bidirectional gRPC stream, and the worker's game thread
+blocks waiting for a response, so there is exactly one outstanding request per
+stream at any time. The servicer is a plain loop: read a request, answer it,
+yield the response, repeat.
 
-Run: uv run python -m anvil.bridge.server [--port 50051] [--mode echo]
-     [--tags mtg.priority,mtg.mulligan_keep,...]
-     [--ckpt data/training/d7-ep3/last.pt --pass-delta 0.0]
+Three modes:
+- **echo**   — Echo back the worker's pre-drawn answer. The gRPC-arm game is
+  bit-identical to a local-arm game, so the throughput delta isolates
+  serialization and transport cost (the "bridge tax").
+- **random** — Answer uniformly at random, seeded per game from
+  ``GameStart.seed``. Deterministic per seed, shaped like the real model
+  mode for comparison.
+- **model**  — THE REAL MODE. Featurize the wire observation through the
+  same code path as ``dataset.py``'s collate, run ``AnvilNet.act`` via the
+  ``_Batcher``, translate the output into a ``CastPlan`` + one-field tags
+  (priority, mulligan, trigger, attack, block, number), and write a
+  behavior-policy mu record to a JSONL file if sampling (self-play
+  generation). The mu record format must stay in lockstep with
+  ``apply_mu_labels()`` in ``rl.py``.
 
-One bidirectional stream per worker; one outstanding request per stream by
-construction (the worker's game thread blocks), so the servicer is a plain
-loop. Model inference is batch-1 behind a lock at first light — micro-batching
-across streams is the known lever if the w=16 arms want it. Stats print on
-Ctrl-C.
+Model-mode flow per decision request:
+
+```
+1. Deserialize gRPC request (GameStart / DecisionStep)
+2. Featurize wire observation → Example (same path as training dataset)
+3. Submit to _Batcher (GPU micro-batching across streams)
+4. Translate model output → CastPlan + tags + combat declarations
+5. Write mu record to mu.jsonl if sampling (self-play generation)
+6. Return gRPC response
+```
+
+Performance: the ``_Batcher`` is the critical lever. Batch-1 inference tops
+out at ~59 req/s on a single GPU, but self-play at 8 workers needs ~81 req/s.
+The ``_Batcher`` accumulates up to ``max_batch`` example submissions across
+all worker streams within a ``window_ms`` time window, then runs a single
+``act()`` on the whole batch. The real bottleneck today is CPU featurization,
+not GPU forward pass.
+
+```
+                Decision Servicer                    _Batcher
+worker1 ──▶ ┌─────────────────┐    submit(ex) ┌────────────────┐
+            │  decode gRPC    │──────────────▶│  accumulate in │
+worker2 ──▶ │  featurize      │    submit(ex) │  window_ms     │  ┌──────────┐
+            │  translate      │──────────────▶│  collate +     │──│ act(B)   │
+worker3 ──▶ │  write mu       │    submit(ex) │  act()         │  └──────────┘
+            └─────────────────┘──────────────▶└────────────────┘
+```
+
+Run with:
+
+    uv run python -m anvil.bridge.server [--port 50051] [--mode echo]
+        [--tags mtg.priority,mtg.mulligan_keep,...]
+        [--ckpt data/training/last.pt --pass-delta 0.0]
+
+Print stats (per-tag counts, model counters, throughput) on Ctrl-C.
 """
 
 from __future__ import annotations
@@ -332,7 +367,7 @@ class ModelBackend:
                 ref.player = pick - n_ent  # registered index (label convention)
         x = int(out["x_cls"][0])
         cp.has_x = True
-        # class 17 = ">16" overflow bucket; clamp + count (decision 2026-07-10)
+        # class 17 = ">16" overflow bucket; clamp + count
         cp.x_value = min(x, 16)
         if x >= 17:
             self.counts["x_overflow_clamped"] += 1

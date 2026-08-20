@@ -1,20 +1,190 @@
 # pyright: basic
-"""AnvilNet v0 (M1 D4) + SA-level candidates (M2 D2): encoder + trunk + rung-1 heads.
+"""AnvilNet: the central transformer model that turns a game state into action policies.
 
-Trunk: pre-LN transformer encoder, d=512, 8 heads, 10 layers (plan band
-8-12). Priority pointer scores PASS + candidate rows; since M2 D2 a
-candidate is a (host entity, SA descriptor) pair — the key adds a learned
-SA-string-vocab + kind embedding when n_sa > 0 (n_sa=0 reproduces the M1
-host-level architecture for old checkpoints). Target/X/one-field heads and
-the win-prob value head as at M1. The turn-plan latent (§3) enters as a
-second read-out token when the target pointer lands.
+```
+Batch ──→ CardEncoder ──→ StateAssembler ──→ Transformer ──→ heads
+                  │                  │              │
+            frozen text +       entities +     [STATE] read-out
+            structured feats    history seq    for value / pointer
+```
 
-Combat heads (M2 D5): factorized per-candidate-row declare-attackers/
-blockers — attack yes/no logit + dedup count classes + target pointer per
-row; block pointer over attacker rows ∪ a learned none key. Factorized (not
-autoregressive) per the D5 design; the AR decoder is the documented D6
-exploration-coherence upgrade path. Pre-D5 checkpoints load via load_compat
-(task_emb row growth + fresh-init combat params).
+**What the reader already knows.** The four modules before this one
+prepare the inputs:
+
+- anvil/encoder/transform.py:  densifies a raw game record into Tensor arrays.
+- anvil/encoder/cards.py: encodes card text + structured identity into `d_card`-
+  dimensional vectors (frozen embedding + 2-layer MLP fusion).
+- anvil/state/tokens.py (StateAssembler): assembles the trunk input sequence:
+  `[STATE] | [PLAN] | entity₁ … entityₙ | history₁ … historyₖ`.
+
+This file runs *after* all that. It is the model. The reason the pipeline
+is split this way: the encoder layers (cards, assembly) are stateless —
+they map raw observations to fixed-size vectors. The model is where
+learning happens: attention, pointer logic, autoregressive decoding.
+
+---
+
+## Architecture
+
+A **pre-LayerNorm transformer** (also called pre-LN: `norm_first=True`):
+
+```
+d_model = 512   n_heads = 8   n_layers = 10   activation = GELU
+             dropout = 0.0   feedforward = 4× d_model
+```
+
+The trunk input has length `1 + 1 + num_entities + history_k`. The first
+two positions are special:
+
+| Token   | Position | Role |
+|---------|----------|------|
+| [STATE] | 0        | Pooled read-out for the value head and every pointer query |
+| [PLAN]  | 1        | Reserved latent for turn-plan consistency losses (currently unused) |
+| entity_i | 2..n    | One per visible game entity (card+features fused by StateAssembler) |
+| history_j | n+1..  | Past-method embeddings (actor flag + method-id) |
+
+---
+
+## Output heads
+
+After the trunk, we slice off the [STATE] and entity vectors and route
+them through parallel heads. Each head is designed for one kind of
+decision the agent must produce on a Magic: The Gathering turn.
+
+### 1. Policy head — pointer over candidates
+
+Index 0 is always PASS. Indices 1..C point at rows in the candidate pool
+(each row is a (host entity, SA descriptor) pair).
+
+```
+query = W_q @ [STATE]                         # (B, 1, d)
+key   = W_k @ entity_out                      # (B, N, d)
+k_cand = key.gather(candidate_rows)            # (B, C, d)
+
+logit = query·k_cand / √d                     # (B, C)
+logit[:, 0] = pass_head([STATE]) + pass_delta # calibrated bias
+```
+
+When `n_sa > 0` the key gets a learned SA-string-vocab + kind embedding.
+When `n_sa = 0` it reproduces the simple host-level architecture (needed
+for backward-compatible checkpoint loading).
+
+### 2. Target decoder — autoregressive pointer over slots
+
+After the agent picks a candidate, it must specify *where* on the
+resulting stack to put the spell, *which* targets, *how much* mana to
+pay — up to `T_MAX + 1` slots. The last slot emits STOP.
+
+This is a **recurrent pointer**: each slot sees the sum of vectors picked
+so far.
+
+```
+# keys: entity vectors ∥ player vectors ∥ stop_key
+# query at slot t:
+qₜ = W_q([STATE ∥ src_vec ∥ prev_sum]) + slot_emb[t]
+logitₜ = qₜ·keys / √d
+
+# teacher-forced (forward):  prev_sum accumulates the TRUE label's vector
+# autoregressive  (act):      prev_sum accumulates the MODEL'S pick
+```
+
+### 3. X head — classifier for X-spells
+
+A simple MLP on `[STATE ∥ src_vec]` producing logits over 0..16 + overflow.
+
+### 4. One-field heads — bools and numbers
+
+For decisions that are neither pointer nor target (mulligan keep? trigger
+yes/no? choose a number?):
+
+```
+input = [STATE ∥ ctx_entity ∥ task_emb[task_id]]
+bool_head → 1 logit (BCE)
+num_head  → class logits masked to [num_lo, num_hi]
+```
+
+### 5. Value head — win probability
+
+A single logit from [STATE] alone, trained with BCE against game outcomes.
+
+### 6. Combat heads — factorized attack/block declarations
+
+Each candidate row gets its own independent prediction. Not autoregressive
+(no slot-by-slot coherence — that is a future upgrade path). Per row:
+
+```
+row_vec = entity_out[candidate_row]
+input   = [row_vec ∥ STATE]
+
+atk_head      → attack yes/no (BCE)
+cmb_count_head → count classes 1..group-size (CE, masked)
+atk_tgt_head  → pointer over entities + players
+blk_head      → pointer over attacker rows ∪ {NONE key}
+```
+
+---
+
+## Three public methods
+
+### `forward(batch)` — training pass
+
+Encodes, runs the trunk, reads out all heads. The target decoder is
+teacher-forced (ground-truth labels drive `prev_sum`). Returns a dict of
+all logits plus the [PLAN] latent.
+
+### `act(batch, pass_delta=0, noise=None, temperature=1.0)` — inference
+
+Same encoding + trunk. The target decoder is **autoregressive**:
+
+```
+stopped = False
+prev = zeros
+for t in 0..T_MAX:
+    q = W_q([STATE∥src_vec∥prev]) + slot_emb[t]
+    logits = q·keys / √d
+    pick = argmax(logits)          # or Gumbel-max if noise is provided
+    prev += vecs[pick]
+    if pick == stop_idx: stopped = True
+```
+
+When `noise` (a dict from `sampling.pad_noise`) is provided, every head
+switches from argmax to Gumbel-max sampling and logs the log-probabilities
+and entropies of the picks under the temperature-scaled distribution.
+These `logp_*` / `ent_*` tensors become the behavior policy `mu` that the
+V-trace learner corrects against. When `noise=None`, the path is
+deterministic (byte-identical to the pre-sampling server path).
+
+`pass_delta` is a post-hoc calibration knob that biases the PASS logit
+up/down — used by `calibrate_pass.py` to trade off pass precision vs recall.
+
+### `losses(batch, ...)` — all training terms with correct masking
+
+```
+losses returns {
+    policy, target, x, value, bool, num,
+    atk, cmb_count, atk_tgt, blk,
+    loss = weighted_sum(...),
+    acc, acc_nonpass, acc_target, acc_atk, acc_blk
+}
+```
+
+Every loss term fires only on its own task rows (label = -1 means "mask
+this sample"). Per-head weights are configurable keyword arguments.
+
+---
+
+## `load_compat(state_dict)` — backward-compatible checkpoint loading
+
+Old checkpoints lack params that were added in later revisions. Rather
+than training from scratch, `load_compat` handles three growth boundaries:
+
+| Growth | What changed | How we load |
+|--------|--------------|-------------|
+| task_emb rows 6→8 | New attack/block tasks | Saved rows load exactly; new rows keep their fresh init |
+| ent_proj columns 17→18 | New `cmd_tax` feature | New column is ZERO-padded (not random) — pre-growth output unchanged until the feature trains |
+| Combat params missing | `atk_*`, `blk_*`, `cmb_*` were absent | Silently keep fresh init |
+
+Any other mismatch still raises — this is not a blanket `strict=False`.
 """
 
 from __future__ import annotations

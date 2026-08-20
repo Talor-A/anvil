@@ -1,20 +1,172 @@
 # pyright: basic
-"""V-trace self-play learner machinery (M2 D6, docs/design/d6-vtrace-loop.md).
+"""V-trace self-play learner: after behavioral cloning gives you a decent
+policy, RL improves it from self-play data.
 
-Core contract: the composite action logp is a pure sum over LABELED factors —
-the inclusion rules (which factors are part of the action) live in the RL
-loader's label construction and in the server's mu record, which must stay in
-lockstep (see server._write_mu):
-  priority: choice, + tgt slots/x iff choice > 0
-  one-field: the single bool/num factor
-  attack: every real row's yes/no, + cnt (group>1) / target for yes rows
-  block: every real row's slot pick, + cnt for blocking group>1 rows
+The pipeline so far:
 
-composite_logp(fwd, batch) therefore serves three jobs with one body:
-  - recompute mu under the generating checkpoint (the standing drift
-    tripwire: |recomputed - recorded| beyond tolerance = serve/loader skew)
-  - compute pi under the training checkpoint (the V-trace ratios)
-  - the policy-gradient term (differentiable when fwd came from grad mode)
+  train.py  (BC loop)
+       │
+       ▼
+  model.py  (AnvilNet [embed → pool → heads])
+       │
+       ▼
+  dataset.py  (windows, candidate resolution, label construction)
+       │
+       ▼
+  trajectories.py  (store format — mu records, outcomes, replay)
+       │
+       ▼
+  This module → V-trace self-play learner
+
+This module is the RL training loop. It reads stored self-play games
+(trajectories), computes V-trace targets (corrected value estimates and
+policy-gradient advantages), and trains the policy network on them.
+
+─────────────────────────────────────────────────────────────────────
+DATA FLOW (one trajectory)
+─────────────────────────────────────────────────────────────────────
+
+  RlTrajectories
+       │  (segs=[batch₁, batch₂, ...], reward, mu_logp, rej)
+       ▼
+  ┌─── Pass A (no grad) ────────────────────────┐
+  │  forward_segments(net, segs, grad=False)     │
+  │    → logp_pi  (current policy log-probs)      │
+  │    → values   (sigmoid(value_logit))          │
+  │  (Or frozen critic on full-vis windows)        │
+  └───────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─── Mu tripwire ────────────────────────────────┐
+  │  recompute mu logps under reference ckpt     │
+  │  if |recomputed - recorded| > tolerance:      │
+  │    drop trajectory (serve/loader skew)        │
+  └───────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─── V-trace targets ──────────────────────────────┐
+  │  vtrace_targets(values, logp_pi, mu_logp,   │
+  │                reward, gamma, ρ̄, c̄)         │
+  │    → vs:      corrected value targets         │
+  │    → pg_adv:  policy gradient advantages      │
+  │    → rho:     importance-sampling ratios      │
+  └────────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─── Pass B (grad) ────────────────────────────┐
+  │  forward_segments(net, segs, grad=True)     │
+  │    → policy gradient: -(pg_adv · logp)       │
+  │    → value regression: BCE(values, vs)       │
+  │    → entropy hinge (if mean ent < floor)      │
+  └────────────────────────────────────────────────────┘
+       │
+       ▼
+    opt.step()  (gradient accumulation over --traj-per-step)
+
+─────────────────────────────────────────────────────────────────────
+KEY PIECES
+─────────────────────────────────────────────────────────────────────
+
+1. Composite log-probability (composite_logp)
+
+   The model makes many independent logit-group decisions per window
+   (choice, target slot, target entity, bool, number, attack rows,
+   block rows).  composite_logp sums log-softmax over every *labeled*
+   head—heads whose label is -1 (unlabeled) contribute nothing.
+   This single function serves three roles:
+
+     a) recompute mu under the generating checkpoint (drift tripwire)
+     b) compute π under the training checkpoint (V-trace ratios)
+     c) the policy-gradient term (differentiable when fwd was grad-mode)
+
+   Pseudocode:
+
+   ```
+   composite_logp(fwd, batch):
+     total = 0
+     for each head (choice, tgt, x, bool, num, atk, cnt, atgt, blk):
+       if batch[label][head] >= 0:
+         total += gather(log_softmax(fwd[head]), label)
+     return {"logp": total, head_i: lp_i}
+   ```
+
+2. V-trace targets (vtrace_targets)
+
+   Off-policy correction from Espeholt et al. 2018.  The importance
+   ratio ρ = exp(logp_π − logp_μ), clipped to ρ̄ (default 1.0).
+   The corrected value target at timestep s:
+
+     δₛ = ρₛ (rₛ + γ V(xₛ₊₁) − V(xₛ))
+     vₛ = V(xₛ) + Σₖ₍ₛ T⁻¹ γᵉ⁻ˢ (Πⱼ₍ₛᵉ cⱼ) δₖ
+        with cⱼ = min(ρⱼ, c̄)
+
+   The policy-gradient advantage uses the corrected target:
+
+     pg_advₛ = ρₛ (rₛ + γ vₛ₊₁ − V(xₛ))
+
+   Terminal reward: win=1, loss/draw/cap=0.  A stalling leader who
+   times out forfeits the +1.  Optionally shaped by game length
+   (--turn-penalty, --min-turns).
+
+3. Segmented forward passes (make_forward_segments)
+
+   VRAM elasticity.  seg is pure micro-batching—OOM halves it in-place
+   and retries instead of crashing.  The generator yields one segment
+   at a time so the autograd graph fits in VRAM (materializing every
+   segment at once OOM'd on the first real store with grindy 2K-decision
+   games).
+
+   ```
+   forward_segments(model, segs, grad):
+     for s in segs:
+       b = windows_in_segment
+       i = 0
+       while i < b:
+         n = min(seg_size, b - i)
+         try:
+           yield model(seg[i:i+n])     # with/without grad
+         except OOM:
+           seg_size //= 2              # sticks for the rest of the run
+           retry
+   ```
+
+4. Mu tripwire
+
+   Each trajectory carries the original μ log-probs recorded at serve
+   time (under the generating checkpoint).  Periodically (every 25 trajs
+   by default) the learner recomputes those logps under the reference
+   checkpoint.  If |recomputed − recorded| > tolerance, the trajectory
+   is dropped—the mu record was generated by a different version of the
+   model (pipeline skew: a re-issued game, divergent batch, or stale
+   replay store).
+
+5. Entropy hinge (entropy_hinge), not always-on bonus
+
+   The BC-initialized policy starts with mean composite entropy ~0.15.
+   An always-on bonus had no equilibrium and ran away with learning
+   rate (run-2 collapse).  Instead:
+
+     entropy_penalty = max(0, floor − mean_entropy)
+       weighted by this segment's share of the trajectory
+
+   Zero gradient when mean_entropy ≥ floor—a collapse guard that lets
+   legitimate sharpening happen.
+
+6. Replay mixing (RlTrajectories)
+
+   Replay stores from recent iterations are weighted: fresh store = 1.0,
+   older stores = 0.33 (~one extra store-scan, 50% fresh samples).
+   Worker-side collation at seg boundaries eliminates the 87% loader
+   handoff bottleneck measured in the original design (main process
+   spent 83% CPU deserializing per-window tensors while the GPU sat
+   10% busy).
+
+7. Critic path (--critic-ckpt)
+
+   Optionally, a frozen full-visibility value net supplies Pass A values
+   (baseline AND bootstrap in the V-trace target).  The policy's own
+   masked-head value keeps training on the same vs targets—the A/B
+   comparison is logged as v0 (critic) vs v0_masked (policy head).
 """
 
 from __future__ import annotations
@@ -426,7 +578,7 @@ class RlTrajectories(torch.utils.data.IterableDataset):
         self.full_vis = full_vis
         self.turn_penalty = turn_penalty
         self.min_turns = min_turns
-        # Collate WORKER-SIDE at exactly the learner's seg size (2026-07-26).
+        # Collate WORKER-SIDE at exactly the learner's seg size.
         # Yielding per-window example dicts shipped ~20 tensors x hundreds of
         # windows x2 (masked + fv) through the DataLoader's shm+pickle path for
         # the single main process to deserialize and collate: measured 87% of
@@ -765,7 +917,7 @@ def main() -> None:
             {"step": step, "model": net.state_dict(), "config": rl_cfg}, out_dir / f"{tag}.pt"
         )
 
-    # Per-phase wall clock (bench 2026-07-25: the GPU sits ~90% idle through
+    # Per-phase wall clock (the GPU sits ~90% idle through
     # the train phase and throughput is flat in both --seg and --workers, so
     # the bottleneck is neither device capacity nor worker count — this says
     # which phase actually holds the clock). `load` is isolated by timing the

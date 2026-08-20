@@ -104,9 +104,9 @@ class ValidationReport:
     obs_null: int = 0  # dec had no observation (serializer error)
     winner_mismatch: int = 0  # end.winner != games.jsonl winner (fork 06dd428313)
     errors: list[str] = dataclasses.field(default_factory=list)
-    # frames that fail to decode (e.g. a hard-capped game killed mid-write):
-    # quarantined — excluded from the corpus, reported loudly, but not label
-    # errors (an unreadable frame can't poison training; it can't be read)
+    # Frames that fail to decode (e.g. truncated mid-write) are
+    # quarantined — excluded from the corpus, reported loudly, but not
+    # label errors (an unreadable frame can't poison training).
     undecodable: list[str] = dataclasses.field(default_factory=list)
 
     def error(self, game: int, seq: int, msg: str) -> None:
@@ -231,9 +231,9 @@ def validate(store: TrajectoryStore, limit: int | None = None) -> ValidationRepo
             report.undecodable.append(f"game {g}: {type(e).__name__}: {str(e)[:80]}")
             continue
         validate_game(traj, report)
-        # winner cross-check (2026-07-11 lesson: two records encoding the same
-        # fact must be compared somewhere). Pre-fix stores fail this ~50% of
-        # games (end.winner from the post-elimination live list — fork
+        # Winner cross-check: two records encoding the same fact must be
+        # compared somewhere. Pre-fix stores fail this ~50% of games
+        # (end.winner from the post-elimination live list — fork
         # 06dd428313); readers must use winner_seat(), so a mismatch is an
         # error only for stores generated after the fix would exist — flag all,
         # loudly, so a regressed fork can't ship a poisoned corpus again.

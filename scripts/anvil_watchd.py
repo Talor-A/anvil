@@ -3,7 +3,7 @@
 
 Sessions REGISTER long-running processes by dropping a JSON file into
 ~/.local/state/anvil/watch/ (the registration interface — no command-line
-pattern matching anywhere: the 2026-07-31 post-mortem found the ad-hoc
+pattern matching anywhere: the post-mortem found the ad-hoc
 watchers' `pgrep -f` matching their own quoted command lines, so the
 babysitters kept each other's liveness checks satisfied after the driver
 died). Identity is (pid, /proc starttime, boot time): unforgeable, immune

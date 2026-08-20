@@ -1,17 +1,98 @@
 # pyright: basic
-"""Seeded Gumbel-max sampling for serve-time exploration (M2 D6).
+"""Generates the Gumbel noise that pushes AnvilNet.act() from greedy (argmax)
+to sampled exploration during V-trace training, and serializes the resulting
+behavior-policy action records for off-policy correction.
 
-The V-trace actor samples instead of argmaxing. Noise is generated per
-decision at the ITEM's own (unpadded) shapes from a Philox stream keyed by
-(game_seed, dec seq) via the SplitMix64 convention (harness/seeds.py), then
-scattered into the padded GPU batch — samples are therefore deterministic per
-decision and independent of micro-batch composition (the D1 twin-determinism
-property must survive batching; contiguous padding would misalign the
-player/STOP/none columns and silently break it).
+Why Gumbel-max instead of softmax sampling?
+-------------------------------------------
+Softmax sampling draws from p ~ softmax(logits / temperature) — the noise is
+implicit in the distribution.  Gumbel-max reverses this: add independent
+Gumbel(0,1) noise to each logit, then argmax.  The result is *exactly* a
+sample from the softmax distribution, but the noise is a separate tensor
+that can be cached, seeded per-decision, and applied before temperature is
+even known.  Temperature scaling happens upstream in act(); noise is added
+at unit scale.  Logp is reported for the tempered distribution regardless.
 
-Gumbel-max = exact categorical sampling: argmax(logits + g), g ~ Gumbel(0,1).
-Bernoulli heads use the logistic sign test: (logit + l) > 0, l ~ Logistic(0,1).
-Masked positions carry -1e9 logits, so zero noise there never wins.
+Categorical heads (choice, tgt, x, num, cnt, atk_tgt, blk)::
+
+    pick = argmax(logits + gumbel(shape))
+
+Bernoulli heads (bool, atk)::
+
+    pick = (logit + logistic(noise)) > 0
+
+Masked positions carry logits of -1e9, so zero noise there never wins.
+
+Head shapes per task
+--------------------
+
+_TASK_HEADS maps each task name to its ordered list of heads.  The draw order
+within a task is fixed — determinism requires a single canonical sequence.
+
+  Task         Heads (in order drawn)
+  priority     choice -> tgt -> x          (tgt/x only if choice > 0)
+  mull_keep    bool
+  trigger      bool
+  binary       bool
+  number       num
+  attack       atk -> cnt -> atk_tgt       (cnt/atk_tgt per yes row)
+  block        blk -> cnt                  (cnt per blocking row)
+
+The shapes are derived from the item's own unpadded dimensions — the example
+from dataset.py with its actual entity count, not the padded batch size.
+
+Data flow
+---------
+
+::
+
+    sampling.make_noise(ex, task, seed=s)       # item-level noise, unpadded
+          |
+          v
+    sampling.pad_noise([...], batch, device)     # scatter into batch tensor
+          |
+          v
+    model.AnvilNet.act(batch, noise=noise_dict)  # Gumbel-max picks + logp/ent
+          |
+          v
+    sampling.mu_record(g, s, task, ex, aux, out) # serialize action to dict
+          |
+          v
+    rl.apply_mu_labels(ex, rec)                  # reconstruct labels from record
+
+       (mu_record + apply_mu_labels are a lockstep pair — see below)
+
+Deterministic seeds across the batch
+-------------------------------------
+
+Each item gets its own Philox stream keyed by (game_seed, dec_seq) via
+SplitMix64.  Because noise is generated *before* padding (at the item's own
+shape via make_noise()) and only scattered into batch tensors afterward
+(via pad_noise()), two items with the same seed always get the same noise
+independently of which other items share the batch.  This is the
+twin-determinism property: reproducibility is invariant to micro-batch
+composition.  Contiguous per-column padding would misalign the
+player/STOP/none columns across different-sized items and silently break it.
+
+Mu records — the critical sync point
+-------------------------------------
+
+When the V-trace server generates a sampled rollout, mu_record() writes one
+JSON line per decision.  Each record contains the task name, the concrete
+picks (in item-canonical index space — entity rows numbered 0..N_i-1, player
+rows = N_i + p_idx, block-none = M_i), and the composite log-probability:
+
+  .. code-block:: json
+
+    {"g": 7, "s": 3, "task": "priority", "c": 2, "tgt": [8, 4],
+     "x": 3, "lp": {"choice": -0.12, "tgt": -0.04, "x": -0.01},
+     "logp": -0.17}
+
+The inclusion rules — which heads contribute to the composite logp — must be
+*identical* between mu_record() here and apply_mu_labels() in rl.py.  An
+inclusion mismatch means the V-trace importance weight corrects for the wrong
+action, silently corrupting the gradient.  This is the module's sharpest
+edge: any change to the recording logic must update both sides in lockstep.
 """
 
 from __future__ import annotations

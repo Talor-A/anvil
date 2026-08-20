@@ -4,7 +4,7 @@ measure_combat_labels.py counted 141 blk_violation_target_not_attacker +
 1 blk_violation_not_in_preobs + 3 blk_violation_other over 113,591 games but
 captured no examples. This script re-runs the block half of that scan and
 records rich context per violation so the class can be named before the
-loader lands (devlog 2026-07-13).
+loader lands.
 
 Leading hypothesis: multi-combat turns. The label join is bounded by `turn`
 only, so a declare-blockers dec can join to a later combat's blk window

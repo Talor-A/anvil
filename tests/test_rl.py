@@ -255,7 +255,7 @@ def test_iteration_batches_and_replay_mixture():
 
 
 def test_batch_chunk_guarantees_two_rounds():
-    """Chunk-tail hazard (2026-08-03 retraction): a batch with fewer than two
+    """Chunk-tail hazard retraction: a batch with fewer than two
     chunks per worker is paced by its slowest worker's contiguous block. Each
     generation batch clamps args.chunk so every worker sees >=2 refills."""
     from anvil.training.selfplay import batch_chunk

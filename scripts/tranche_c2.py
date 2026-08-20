@@ -1,5 +1,5 @@
 """M6 label-expansion campaign: c2 drill-mode tranche for the B-2 lever
-(ADR-0044 decision 3, user-approved 2026-08-08).
+(ADR-0044 decision 3, user-approved).
 
 The B-2 unfreeze probe cleared the frozen-benchmark gate and its label
 curve was rising at the 3.6K boundary (1K 0.443 -> 2K 0.450 -> 3.6K

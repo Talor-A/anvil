@@ -1,5 +1,5 @@
 """Cycle curation stock: fresh iter-019 mainlines -> rank-critic traces
--> calibrated curation (M6 graduated cycle, user-approved 2026-08-08).
+-> calibrated curation (M6 graduated cycle, user-approved).
 
 The critic asset (rank-critic-c2v3) trained on rollout labels drawn from
 every existing iter-019 game population — so honest curation stock must

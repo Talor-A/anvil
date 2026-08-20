@@ -1,5 +1,5 @@
 """Early-doom analysis (M3 flex track: ceiling estimate + Grindstone
-curation signal, queued in the 2026-07-23 devlog).
+curation signal, queued in the devlog).
 
 Question: of the model's LOSSES in the 2,000-game closing read, what
 fraction were luck-locked — games the omniscient critic says were never

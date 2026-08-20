@@ -36,7 +36,7 @@ def _stub_collate(exs):
 
 def _pre_collated(n: int, seg: int):
     """Segments as the loader worker now hands them over: already collated at
-    the learner's seg size (2026-07-26 refactor), so OOM elasticity has to
+    the learner's seg size (worker-side collate refactor), so OOM elasticity has to
     SLICE them rather than re-chunk a list of examples."""
     exs = [{"x": torch.full((3,), float(i))} for i in range(n)]
     return [_stub_collate(exs[i : i + seg]) for i in range(0, n, seg)]

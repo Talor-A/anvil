@@ -1,25 +1,75 @@
-"""Tensor assembly v0: observation record -> dense arrays (M1 D1).
+"""Featurizer: raw game observation -> dense arrays the model sees.
 
-The deterministic Python half of ADR-0004's featurization line: Java logs
-versioned entity-level records at generation time; this transform turns one
-decision record into model-ready arrays. Feature iteration happens HERE (free,
-no regeneration); only state-extraction changes touch the Java side. At
-inference (D8) the decision server runs this same transform on the
-`observation: bytes` payload before the GPU pass.
+This is the one place where a decision-stage observation record gets turned
+into the flat float32 tensors that feed the transformer. Every column of
+every tensor in the system is defined by three constant lists:
 
-Information-set enforcement lives here and only here: the record carries full
-state (belief-head ground truth, M2); the transform is the gate that keeps
-hidden identities away from the policy input. `tests/test_transform.py` holds
-the leak test — output for perspective P must be invariant under permutation
-and identity-substitution of entities P cannot see.
+    ENTITY_FEATURES   -- one row per distinct entity (18 scalars)
+    GLOBAL_FEATURES    -- one row per decision point (8 scalars)
+    PLAYER_FEATURES    -- one row per player, self first (6 scalars)
 
-v0 is the boundary contract, not the full §1/§2 encoder: card identity leaves
-as a name list (embedding lookup + fusion is D4); features are the schema's
-dynamic fields; multiset dedup (§2) collapses identical entities into one row
-plus a count.
+The scalars are zone-indexed, normalized, boolean-flagged, and scale-corrected
+before they leave this file. If a feature doesn't appear in these lists, the
+model never sees it.
 
-Everything Magic-specific keys off vocab_mtg.json (mtg.* namespace); the
-envelope handling above it is game-agnostic (§1 hygiene).
+---
+
+assemble() -- main entry
+
+Call on one decision record. Returns a dict with four arrays:
+
+    entities      -> (N, 18) float32 -- feature rows, one per distinct entity
+    entity_names  -> list[str|None]  -- card name or None (hidden identity)
+    globals       -> (8,) float32    -- turn, phase, turn-based flags
+    players       -> (n_players, 6) float32 -- life, hand, library, lands, mana, lost
+
+Assemble is *the* information-set gate. The observation record carries full
+ground truth (belief-head state, opponent hands, library contents). This
+function decides what the model is allowed to know. An entity's identity is
+exposed as its name only when `visible_to()` returns True -- zone defaults,
+overridden by explicit visibility flags. `tests/test_transform.py` holds the
+leak test: output for perspective P must be invariant under permutation and
+identity-substitution of entities P cannot see.
+
+---
+
+Entity dedup (the multiset trick)
+
+In Magic, two tapped 3/3 goblin tokens are indistinguishable. The dedup step
+(`_dedup_key`) collapses identical entities into one row with a `count`
+scalar. The key drops entity id and attachment/combat target ids (those
+arrive later via pointer-head lookups). What remains is the multiset: same
+card name + same zone + same state -> one row. Record order is discarded
+explicitly -- sorting by dedup key means record order cannot leak hidden
+information (the leak test enforces this).
+
+---
+
+history_tokens() -- what just happened
+
+The last `HISTORY_K` (8) prior decisions, packed into a tiny ring buffer.
+Each token records:
+
+    method   -> string like "playCard"
+    self     -> 1 if the actor is the current perspective
+    e        -> entity id of the chosen host, or -1 if hidden/none
+
+Opponent searches, scries, and face-down picks are sanitised: the actor is
+visible (public), the target host is dropped unless the event was a public
+stack placement (priority cast). This is the same info-set gate.
+
+---
+
+TRANSFORM_VERSION
+
+Bumped every time feature shapes change. Served in the output so the training
+pipeline can reject stale checkpoints and the projection heads can validate
+their weight dimensions against it.
+
+See also:
+  tests/test_transform.py     -- leak test + shape contracts
+  encoder/vocab_mtg.json      -- zone/phase vocab, mana symbols
+  encoder/fusion_head.py      -- embedding lookup + cross-attention (next)
 """
 
 from __future__ import annotations

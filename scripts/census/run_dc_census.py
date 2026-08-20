@@ -37,7 +37,7 @@ FORGE_GUI_DIR = FORGE_DIR / "forge-gui"
 
 
 def latest_manifest() -> dict:
-    # data/pool/CURRENT pin (2026-08-03); was newest-mtime
+    # data/pool/CURRENT pin; was newest-mtime
     from anvil.pool import current_manifest
 
     return current_manifest()

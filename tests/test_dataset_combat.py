@@ -83,7 +83,7 @@ def test_attack_empty_label_and_eligibility():
 def test_join_bounded_at_next_combat():
     # the dec's own combat never flags; a later combat this turn does. The
     # bounded join must return the EMPTY label, not the later combat's map
-    # (the 145-violation overshoot class, classified 2026-07-13).
+    # (the 145-violation overshoot class).
     d = dec_of("declareAttackers", [ent(1)])
     redeclare = dec_of("declareAttackers", [ent(1)], s=101)
     later = dec_of("x", [ent(1, atk={"pi": 1})], s=102)

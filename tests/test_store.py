@@ -3,7 +3,7 @@
 The synthetic frames mimic the Java writer's output byte-for-byte in structure
 (one zstd frame per game appended to obs.zst, idx sidecar with offsets), so
 these tests pin the file-format contract from the Python side; the Java side
-is pinned by the end-to-end smoke run (devlog 2026-07-04).
+is pinned by the end-to-end smoke run.
 """
 
 import json
@@ -256,7 +256,7 @@ def test_stale_ret_dropped():
 
 
 def test_undecodable_frame_quarantined(tmp_path):
-    """A truncated frame (hard-capped game killed mid-write) is quarantined by
+    """A truncated frame (mid-write kill) is quarantined by
     validate and by games(skip_undecodable=True), never silently swallowed."""
     import json
 
@@ -498,7 +498,7 @@ def test_forks_ingest_flags_label_mismatch(tmp_path, capsys):
 
 def test_forks_ingest_quarantines_bad_frames(tmp_path, capsys):
     """One corrupt completion frame must cost one frame, not the ingest —
-    a failed drill ingest killed the d6-run10 driver (2026-07-30)."""
+    a failed drill ingest killed the d6-run10 driver."""
     run_dir = _make_run(tmp_path, [[_frame_records(9, 77)]])
     wdir = run_dir / "workers/inv-0001"
     _write_fork_worker(

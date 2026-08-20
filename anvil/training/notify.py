@@ -1,7 +1,7 @@
 """Best-effort push for unattended runs.
 
-Lifted out of the selfplay driver (2026-07-26) so every long-running entry
-point can report its own end. The driver had this from 2026-07-23; the
+Lifted out of the selfplay driver so every long-running entry
+point can report its own end. The driver had it first; the
 2,000-game reads did not, so two ~2h reads finished with nothing telling
 anyone — the user had to ask whether notifications were broken. A run that
 cannot announce its own completion is a run someone has to babysit.
@@ -18,7 +18,7 @@ import sys
 def watch_register(name: str, watch_dir, stall_min: int = 75) -> None:
     """Best-effort self-registration with the standing watcher
     (scripts/anvil_watchd.py + anvil-watch.timer). The process reports its
-    OWN pid — the 2026-07-31 post-mortem retired every pattern-derived pid
+    OWN pid — the post-mortem retired every pattern-derived pid
     acquisition after `pgrep -f` self-matches claimed three babysitters.
     Clean exits must call watch_unregister; dying without it is the point:
     the watcher then notifies GONE. Never raises."""

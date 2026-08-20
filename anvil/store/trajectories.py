@@ -1,17 +1,112 @@
-"""Trajectory store v0 (docs/design/observation-schema-v1.md).
+"""I/O layer for game recordings: read, index, and serve compressed game frames.
 
-Layout under data/trajectories/<run_id>/:
-  manifest.json  provenance (run pins + pool version + obs schema); engine
-                 hashes live here and ONLY here — never in records.
-  obs-NNNN.zst   worker frame files, renumbered at ingest; one independent
-                 zstd frame per game, JSONL records inside.
-  index.jsonl    one line per game: file, offset, lengths, seed, record count.
-  games.jsonl    per-game outcome records (merged worker progress logs).
+Every self-play game is recorded as one independent zstd-compressed JSONL frame.
+The store indexes frames so any game can be read by index *without* scanning
+the whole corpus — essential when a training run consumes 50K+ games and you
+want random access or streaming iteration.
 
-Ingest is a copy + index, not a re-encode: frames are read back by (file,
-offset, clen) so orphaned bytes from crashed games (frames that never got an
-idx line) are skipped naturally. The corpus is regenerable (seeds + heuristic);
-there is deliberately no backup story.
+Directory layout:
+
+```
+data/trajectories/<run_id>/
+  manifest.json     provenance pins (run hashes, schema version, pool version)
+  obs-NNNN.zst      compressed frame files — one zstd frame per game, JSONL
+                    records inside (header, decisions, rets, end)
+  index.jsonl       one line per game: (file, offset, clen, seed, record count)
+  games.jsonl       per-game outcome records — the TRUE winner lives here, not
+                    in the frame end record (see winner_seat() below)
+  mu.jsonl          optional: behavior-policy action records for RL training
+  labels.jsonl      optional: rollout-label aggregates for fork-point games
+```
+
+---
+
+### How frames work
+
+A game is a sequence of JSONL records inside one zstd frame:
+
+```
+record 0: {"k": "game", "g": 0, "sv": 1, ...}     # header
+record 1..N-2:                                         # decisions + rets
+  {"k": "dec", "s": 0, "m": "play", ...}            # decision event
+  {"k": "ret", "s": 0, "v": 7, ...}                 # response (same seq)
+  {"k": "dec", "s": 1, "m": "play", ...}            # nested decision
+record N-1: {"k": "end", "winner": 0, ...}          # end record
+```
+
+Decisions *nest* — a parent’s ret arrives after its children’s decisions:
+
+```mermaid
+sequenceDiagram
+    participant Game
+    participant Engine
+    Game->>Engine: dec s=0 (host action)
+    Engine-->>Game: ret s=0
+    Note over Game: --- children now fire ---
+    Game->>Engine: dec s=1 (entity action inside host window)
+    Engine-->>Game: ret s=1
+```
+
+This means training-history reconstruction (which answers were *visible* when
+each decision fired) must track the *position in the record stream*, not just
+“the answer eventually arrived.” That’s why `_pos` and `_retpos` exist: they
+give each decision its place in the stream, and the dataset module uses those
+positions to build the correct causal window.
+
+---
+
+### winner_seat(): the winner is not in the frame
+
+There is a subtle gotcha. The end record carries `"winner": 0` — but for games
+recorded before mid-2026, that field is the *post-elimination index into the
+live player list*, which is almost always 0 (the last survivor). The end
+record winner was wrong **~50% of the time**. The real winner comes from the harness progress logs,
+merged at ingest time into `games.jsonl`. Always call `winner_seat()`, never
+read `end["winner"]`.
+
+---
+
+### open_store() and MultiStore
+
+`open_store()` accepts a single directory or a comma-separated list. When
+you pass multiple directories, you get a `MultiStore` — a logical union
+that presents several runs as one contiguous game corpus. This is how
+replay mixing works: separately stored extension runs (D3 pilot games 0–50K, D6
+games 50K–...) are read together.
+
+Game indices must be disjoint — the intended shape is that extension runs
+continue the same seed stream, so game index N always means “the Nth
+deterministic game” regardless of which store it’s in.
+
+---
+
+### ingest: copy-and-index, not re-encode
+
+The `ingest` subcommand collects worker frame files from a harness run
+directory, copies them into the store (renumbered), and builds the index.
+It does *not* re-encode: frames are read back by (file, offset, clen), so
+orphaned bytes from crashed games (frames that never got an index entry)
+are naturally skipped. The corpus is regenerable from seeds + heuristic,
+so there is deliberately no backup story.
+
+Key classes:
+- `GameTrajectory` — one decoded game: header, decisions (with rets joined), end, marks
+- `TrajectoryStore` — reads games from one store directory
+- `MultiStore` — reads several stores as one corpus
+
+Key functions:
+- `open_store(spec)` — opens a store dir or comma-separated list
+- `decode_frame(data)` — decompresses + parses one game frame into components
+- `winner_seat(g)` — true winner from the outcome record (not the buggy end field)
+- `mu_for_game(g)` — behavior-policy records keyed by (game, sequence id)
+- `ingest(...)` — consolidates a run into the store
+- `status(root)` — prints a summary of a store
+
+Connects to prior modules: the dataset module (training/dataset.py) streams
+from these stores to build task-labeled PyTorch examples; the tensor schemas
+(schemas/tensors.py) define the output shapes those examples fill. This module
+is the extract step — take raw game frames, produce structured Python objects
+the dataset loader can iterate.
 """
 
 from __future__ import annotations
@@ -103,7 +198,7 @@ class TrajectoryStore:
         # Per-game outcome records (harness progress logs, merged at ingest).
         # These carry the TRUE winner: the frame end-record's "winner" field
         # is broken pre-fork-fix (derived from the post-elimination live
-        # player list -> ~always 0; found 2026-07-11, D4). Never read
+        # player list -> ~always 0). Never read
         # end["winner"] for outcomes — use winner_seat().
         self.outcomes: dict[int, dict] = {}
         games_path = self.root / "games.jsonl"
@@ -116,9 +211,7 @@ class TrajectoryStore:
                     continue
 
     def winner_seat(self, g: int) -> int | None:
-        """True winning seat from the outcome record; None for non-decisive
-        games, missing records, or unparseable winner names. Verified against
-        final life totals/lost flags 492/492 on the D3 pilot (2026-07-11)."""
+        """The seat index of the winner, or None for draws or unparseable games."""
         r = self.outcomes.get(g)
         if not r or r.get("status") != "won" or not r.get("winner"):
             return None
@@ -160,9 +253,9 @@ class TrajectoryStore:
         return GameTrajectory(header, decisions, end, entry, marks)
 
     def games(self, skip_undecodable: bool = False) -> Iterator[GameTrajectory]:
-        """skip_undecodable: quarantine truncated/corrupt frames (a hard-capped
-        game killed mid-write) instead of raising — training readers want the
-        49,999 good games, not an exception on the one bad frame."""
+        """Yields each game in index order, skipping frames that fail to decode
+        when skip_undecodable is True — training pipelines want the 50K good
+        games, not an exception on a truncated write."""
         for g in self.game_indices():
             try:
                 yield self.game(g)
@@ -184,11 +277,26 @@ class TrajectoryStore:
 
 
 class MultiStore:
-    """Several stores read as one corpus. Game indices must be disjoint —
-    the intended shape is runs that extend one seed stream (harness
-    --start-index: the D3 pilot holds games [0, 50K), the D6 extension
-    [50K, ...)), so a global game index keeps meaning "one deterministic
-    game" and split functions of it stay consistent across stores."""
+    """Multiple TrajectoryStore directories presented as a single contiguous corpus.
+
+    Each store contributes its games to a unified view — the Nth game in the
+    combined index always refers to the same deterministic game, no matter
+    which physical directory it lives in.
+
+    This requires that game indices never overlap across stores. The intended
+    layout is sequential extension runs:
+
+        D3 pilot   → games [0, 50000)
+        D6 extension → games [50000, ...)
+
+    If two stores both claim game 17, MultiStore raises on construction,
+    because game 17 cannot mean two different games.
+
+    Why not just copy everything into one directory? Because stores can live
+    on different volumes, be added incrementally as new runs complete, and
+    be queried independently — the union is a reader convenience, not a
+    physical merge.
+    """
 
     def __init__(self, roots):
         self.stores = [TrajectoryStore(r) for r in roots]
@@ -325,8 +433,8 @@ def ingest(
             for e in entries:
                 try:
                     if e["clen"] == 0 or e["rlen"] > (1 << 30):
-                        # phantom rows (zero bytes reached the file — the
-                        # fd-death class, 2026-07-30) and RAW_CAP runaways
+                        # phantom rows (zero bytes to the file — fd-death class)
+                        # and RAW_CAP runaways
                         # (undecodable under the reader's 1 GiB output cap)
                         raise ValueError("phantom or runaway frame")
                     header, _, end, _ = decode_frame(data[e["off"] : e["off"] + e["clen"]])

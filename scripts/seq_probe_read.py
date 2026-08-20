@@ -1,4 +1,4 @@
-"""Sequence-probe read (M7 D2 routing pin, 2026-08-11).
+"""Sequence-probe read (M7 D2 routing pin).
 
 Consumes -forceseq labels JSONL (one row per fork point, three arms:
 w_nat[]/w_hold[]/w_act[] over paired triples) and reports, for each

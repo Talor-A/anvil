@@ -3,7 +3,7 @@
 (ADR-0015) on the modern serve stack.
 
 The stale number being retired: ~17 positions/h/worker at K=8 with
-turn-stratified points, measured 2026-07-13 through a BATCH-1 server
+turn-stratified points, measured through a BATCH-1 server
 (~59 rps) — "50K labels ~= 15 days". Since then the serve path gained
 GPU micro-batching (D6) and the w=16 + >=2-round chunk clamp recipe
 (ADR-0032, ~+30% in-loop). This bench runs the same labeler mode

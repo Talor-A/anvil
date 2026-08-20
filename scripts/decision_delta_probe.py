@@ -15,7 +15,7 @@ never reach an eligible choice are excluded from the split. Approximation
 noted: ability activations realize through the same record and count as
 "act" — the probe measures act-now vs hold, a superset of cast timing.
 
-Gate (PINNED 2026-08-10 before numbers were seen, m7-plan D1):
+Gate (PINNED before numbers were seen, m7-plan D1):
   FUNDED iff split-able fraction >= 0.30 AND RMS true Δwr over
   split-able points >= 0.10, plus the directional check that
   hold-then-act-later outperforms act-now where holding occurs.

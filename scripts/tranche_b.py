@@ -1,5 +1,5 @@
 """M6 tranche component B: fresh-game diversity for the extended ranking
-curve (ADR-0039 procedure; staged 2026-08-06 after component A's curve
+curve (ADR-0039 procedure; staged after component A's curve
 flattened at 0.44-0.46 on re-used games).
 
 The component-A confound: the offset tranche re-visits the same ~550

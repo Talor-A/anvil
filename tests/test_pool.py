@@ -149,7 +149,7 @@ def test_banlist_section_attribution():
 
 def test_current_manifest_pin_beats_mtime(tmp_path, monkeypatch):
     """The active pool resolves through data/pool/CURRENT, never mtime
-    (M3 standing hazard, retired 2026-08-03): a stale-but-newer manifest
+    (M3 standing hazard, retired): a stale-but-newer manifest
     must not be picked, and a missing/dangling pin must fail loudly."""
     import json
     import os

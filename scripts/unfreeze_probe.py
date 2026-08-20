@@ -204,7 +204,7 @@ def _cell(
         [p for p in net.parameters() if p.requires_grad], lr=lr, weight_decay=0.01
     )
 
-    # inner_pool (ck1 lesson, 2026-08-08): early stopping must target the
+    # inner_pool (ck1 lesson): early stopping must target the
     # FROZEN holdout's distribution. When train labels grow beyond the
     # base population (offset-heavy tranche labels), an all-games inner
     # split drifts and stops training tuned for the wrong mix — measured

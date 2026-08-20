@@ -54,7 +54,7 @@ def label_window(decs: list[dict], i: int, turn: int, flag: str) -> dict | None:
     Bounded at the next declareAttackers dec as well as the turn boundary:
     extra-combat turns re-enter declare, and a turn-only bound lets a dec
     whose own combat had no flags join a later combat's window (the 145
-    block violations classified 2026-07-13 — all were this overshoot).
+    block violations — all were this overshoot).
     Returns None when the combat ends with no flagged window (empty label)."""
     for d in decs[i + 1 :]:
         if d["m"] == "declareAttackers":

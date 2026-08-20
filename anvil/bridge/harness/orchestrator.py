@@ -377,7 +377,7 @@ def launch(a) -> Path:
         # ExitOnOutOfMemoryError: a batch worker must die (chunk re-issue
         # covers it), not limp — an OOM that escaped the game-loop catch
         # reached Forge's GUI bug-report dialog and wedged two headless
-        # workers forever (model-mirror run, 2026-07-12). The fork also
+        # workers forever (model-mirror run). The fork also
         # installs a headless uncaught handler; this is the JVM-level belt.
         "heap": "2g",
         "jvm_opts": [
@@ -474,7 +474,7 @@ def replay(run_dir: Path, index: int) -> None:
         cmd += ["-tags", m.tags]
     if m.obs:
         # The priority-option scan perturbs which trajectory a seed plays
-        # (D2 smoke, 2026-07-04: 14/20 identical without it) — a replay must
+        # (14/20 identical without it) — a replay must
         # match the original run's logging configuration to reproduce it.
         # The replay's own observation output is a throwaway.
         cmd += ["-obs", str(run_dir / f"replay-{index}-obs.zst")]

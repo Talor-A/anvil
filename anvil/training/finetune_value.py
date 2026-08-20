@@ -1,6 +1,6 @@
 """Value-head-only fine-tune on corrected outcome labels (M2 D4).
 
-Background (2026-07-11): the obs end-record's winner field was derived from
+Background: the obs end-record's winner field was derived from
 the post-elimination live player list in the fork — ~always 0, wrong for
 ~50% of games — so every value head through d2-sa trained on seat noise
 (d2-sa value head vs TRUE outcomes: AUC 0.506 = chance). The loader now
@@ -203,7 +203,7 @@ def main() -> None:
             **vars(a),
             "base_step": ck.get("step"),
             "trainable_params": n_train,
-            "label_fix": "winner_seat join (2026-07-11)",
+            "label_fix": "winner_seat join (post-elimination fix)",
         },
     }
     (out_dir / "config.json").write_text(json.dumps(config, indent=1, default=str) + "\n")

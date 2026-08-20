@@ -1,18 +1,80 @@
-"""D6 V-trace self-play loop driver (docs/design/d6-vtrace-loop.md).
+"""Self-play loop driver: runs iterative cycles of checkpoint, generate, ingest, train, and measure to advance a policy through on-policy game data.
 
-Synchronous iterations on one GPU: serve ckpt_k with sampling on -> generate
-a batch of both-seats-bridged games -> ingest (mu.jsonl joined) -> V-trace
-train on a replay mixture of recent iteration stores -> ckpt_{k+1} -> monitor
-row -> restart server on the new checkpoint. Arms vs the heuristic every N
-iterations (argmax serve, paired seeds) as the progress meter.
+You've already seen the learner (rl.py — V-trace), the model
+(AnvilNet), the dataset loader (dataset.py), and the BC preamble
+(train.py). This module wires them into a closed loop on one GPU.
 
-The driver owns sequencing, provenance, and the anomaly monitor — mechanism
-stays in the existing verbs (server, harness launch, store ingest, rl
-learner, arms_report), each run in its own subprocess so GPU memory is
-released between the serve and train phases.
+Each iteration:
 
-Stop file: touch <out>/STOP to finish the current iteration and exit; resume
-by re-running the same command (loop_state.json carries the chain).
+  1. SERVE: start a sampled-move server on the current checkpoint
+  2. GENERATE: launch N games (mirror + optional heuristic opponent)
+  3. INGEST: join mu records, index trajectories into the trajectory store
+  4. DRILL (optional): re-drill curated positions under the current policy
+  5. CRITIC (optional): finetune the full-visibility value net on replay
+  6. TRAIN: V-trace learner on a replay mixture → new checkpoint
+  7. GUARD: check KL drift, entropy explosion, veto rate, casting rate
+  8. ARMS (periodic): argmax serve vs the heuristic with paired seeds
+  9. LOG metrics, persist loop state
+
+```
+for k in range(iterations):
+    server ← serve(ckpt_k, sample=True, mu_out=...)
+    run_dirs ← launch_games(server, mirror_batch + heur_batches)
+    stop(server)                          # free GPU memory before train
+    ingest(run_dirs)                      # mu join, store index
+    if drill_selection:
+        drill_phase(ckpt_k)               # re-drill curated positions
+    mix ← replay_mixture(stores[-R:])     # fresh stores weighted higher
+    if critic:
+        critic_ckpt ← finetune_value(mix) # full-visibility value net
+    train_dir ← rl(mix, ckpt_k)           # V-trace learner
+    if guard_flags(census, rl):
+        REJECT checkpoint → halt for review
+    advance state: ckpt_{k+1} ← train_dir/last.pt
+    if k % arms_every == 0:
+        arms_report ← serve_argmax_vs_heuristic()
+```
+
+**Why subprocess-per-phase.** The sampled server holds the full model on
+the GPU during generation. The learner holds both the model and optimizer
+states during training. Both can't fit simultaneously (and the server
+isn't needed during training), so each phase launches as a child process
+that reclaims its CUDA context on exit.
+
+**Crash-resume.** Every phase checks whether its output already exists
+before running. Die during arms? Restart re-enters the same iteration
+and skips completed phases. A `STOP` file in the output directory tells
+the loop to finish the current iteration and exit. `loop_state.json`
+carries the chain across restarts.
+
+**Guard rejection.** The guard compares each iteration against the run's
+iteration-0 baselines. Any tripline stops the loop:
+
+    KL(pi || mu)  >  0.05        policy diverged from its own behavior
+    entropy       >  2x baseline  policy collapsing toward uniform
+    veto rate     >  1.5x baseline model keeps picking illegal moves
+    casts/game    <  0.8x baseline model stopped trying (anti-passivity)
+
+A rejected checkpoint stays in the iteration's directory with a REJECTED
+marker file; the loop state does not advance. Re-running re-evaluates
+the same checkpoint — the halt is deterministic and needs a human.
+
+**Replay mixture.** The training mixture draws from the last R
+iterations. The newest iteration's stores get a higher sampling weight
+(fresh_weight, default 1.0) than older stores (replay_weight, default
+0.33) so the learner sees fresh data roughly twice as often. Drill
+stores (fork frames from re-drilled positions) join the same iteration
+group and age through the same window.
+
+**Re-ask.** On a veto (the model picked an illegal choice), the harness
+can re-query the model for a legal alternative instead of forcing a
+pass. This is an environment change — arms results with re-ask are only
+comparable to other re-ask runs.
+
+**Arms.** Every N iterations the policy plays argmax (no sampling)
+against the heuristic AI with paired random seeds. This gives a stable
+cross-iteration win-rate meter independent of the sampled-generation
+noise.
 """
 
 from __future__ import annotations
@@ -75,7 +137,7 @@ def _notify(title: str, msg: str) -> None:
 
 
 def _sleep_inhibitor(name: str) -> subprocess.Popen | None:
-    """Driver-owned systemd-inhibit holder (2026-07-22 suspend lesson): the
+    """Driver-owned systemd-inhibit holder (suspend lesson): the
     desktop must not sleep while a loop runs. The holder child gets
     PR_SET_PDEATHSIG so it dies with the driver on ANY exit path — crash,
     SIGKILL, guard halt — never orphaning a block on the user's laptop lid."""
@@ -181,8 +243,8 @@ def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
 def batch_chunk(games: int, workers: int, chunk: int) -> int:
     """Per-batch chunk size: a batch that resolves to fewer than two chunks
     per worker is tail-bound — elapsed becomes the slowest worker's contiguous
-    deck-pair block (an 11x finish-time spread observed in the wild; see the
-    2026-08-03 bench retraction). args.chunk is a ceiling; each generation
+    deck-pair block (an 11x finish-time spread observed in the wild).
+    args.chunk is a ceiling; each generation
     batch (mirror / heur splits are separate launches) shrinks it so every
     worker gets at least two rounds of refill."""
     return max(1, min(chunk, games // (2 * workers)))
@@ -630,7 +692,7 @@ def main() -> None:
         help="featurize workers for the learner. Was 6 while the "
         "main process was the funnel (collate ran there, so "
         "extra workers only added shm churn and 12 measured "
-        "SLOWER than 6). Since worker-side collate (2026-07-26) "
+        "SLOWER than 6). Since worker-side collate "
         "the consumer is no longer the bottleneck and workers "
         "scale again: 2.062 -> 2.979 traj/s going 6 -> 12.",
     )
@@ -800,7 +862,7 @@ def main() -> None:
     if bool(args.drill_eval_set) != bool(args.drill_eval_every):
         ap.error("--drill-eval-set and --drill-eval-every go together")
 
-    # GPU cotenancy insurance (2026-07-16 OOMs beside a resident ComfyUI):
+    # GPU cotenancy insurance (OOMs beside a resident ComfyUI):
     # reclaims allocator fragmentation for this process and all subprocesses
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -841,7 +903,7 @@ def main() -> None:
     # Line-buffer our own narration: under a detached launch (stdout -> log
     # file) block buffering held EVERY driver print in memory for run-8's
     # whole 36h — "===== iteration" markers, guard text — starving the log
-    # watcher; subprocess output interleaved fine (own fds). Found 2026-07-25.
+    # watcher; subprocess output interleaved fine (own fds).
     assert isinstance(sys.stdout, TextIOWrapper)
     sys.stdout.reconfigure(line_buffering=True)
     monitor = open(out / "monitor.jsonl", "a", buffering=1)

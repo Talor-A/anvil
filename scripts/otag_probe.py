@@ -1,4 +1,4 @@
-"""Oracle-tag functional-feature probe (M6 exploratory, 2026-08-08).
+"""Oracle-tag functional-feature probe (M6 exploratory).
 
 Three steps, all cheap (no GPU — safe alongside a running campaign):
 
