@@ -28,3 +28,5 @@ jobs:
       - name: Run ruff check
         run: uv run ruff check anvil scripts tests
 
+      - name: Run ruff format check
+        run: uv run ruff format --check anvil scripts tests

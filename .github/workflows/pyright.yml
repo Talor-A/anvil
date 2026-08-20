@@ -9,9 +9,6 @@ on:
 jobs:
   pyright:
     runs-on: ubuntu-latest
-    # Non-blocking until the D3-era typing sweep lands (105 findings on the
-    # un-swept tree); flip to enforcing with that sweep.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
